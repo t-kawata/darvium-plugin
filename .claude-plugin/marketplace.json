@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "ecc-darvium",
+      "name": "darvium",
       "source": "./",
       "description": "Darvium-optimized Claude Code plugin for Rust crate development with observational/simulation-driven testing"
     }
