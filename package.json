@@ -1,0 +1,30 @@
+{
+  "name": "mycute-claude-config",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MYCUTE-optimized Claude Code configuration — hooks, rules, skills, agents, commands",
+  "license": "MIT",
+  "files": [
+    "agents/",
+    "commands/",
+    "contexts/",
+    "hooks/",
+    "mcp-configs/",
+    "rules/",
+    "scripts/hooks/",
+    "scripts/lib/",
+    "skills/",
+    "tests/"
+  ],
+  "scripts": {
+    "test": "node tests/run-all.js",
+    "coverage": "c8 --all --include=\"scripts/**/*.js\" --check-coverage --lines 80 --functions 80 --branches 80 --statements 80 --reporter=text --reporter=lcov node tests/run-all.js",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "c8": "^11.0.0",
+    "eslint": "^9.39.2",
+    "globals": "^17.4.0"
+  }
+}

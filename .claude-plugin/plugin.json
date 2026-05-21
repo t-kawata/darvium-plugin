@@ -1,0 +1,20 @@
+{
+  "name": "ecc-mycute",
+  "version": "0.1.0",
+  "description": "MYCUTE-optimized Claude Code plugin derived from everything-claude-code",
+  "author": {
+    "name": "Toshimi Kawata"
+  },
+  "repository": "https://github.com/t-kawata/ecc-mycute",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "mycute",
+    "agents",
+    "skills",
+    "hooks",
+    "rules",
+    "rust",
+    "tauri"
+  ]
+}

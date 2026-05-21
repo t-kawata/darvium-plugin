@@ -1,0 +1,13 @@
+{
+  "name": "ecc-mycute-marketplace",
+  "owner": {
+    "name": "Toshimi Kawata"
+  },
+  "plugins": [
+    {
+      "name": "ecc-mycute",
+      "source": "./",
+      "description": "MYCUTE-optimized Claude Code plugin derived from everything-claude-code"
+    }
+  ]
+}
