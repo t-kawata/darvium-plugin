@@ -1,13 +1,13 @@
 {
-  "name": "ecc-mycute-marketplace",
+  "name": "ecc-darvium-marketplace",
   "owner": {
     "name": "Toshimi Kawata"
   },
   "plugins": [
     {
-      "name": "ecc-mycute",
+      "name": "ecc-darvium",
       "source": "./",
-      "description": "MYCUTE-optimized Claude Code plugin derived from everything-claude-code"
+      "description": "Darvium-optimized Claude Code plugin for Rust crate development with observational/simulation-driven testing"
     }
   ]
 }

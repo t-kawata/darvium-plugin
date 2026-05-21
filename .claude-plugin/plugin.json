@@ -1,20 +1,22 @@
 {
-  "name": "ecc-mycute",
+  "name": "ecc-darvium",
   "version": "0.1.0",
-  "description": "MYCUTE-optimized Claude Code plugin derived from everything-claude-code",
+  "description": "Darvium-optimized Claude Code plugin for Rust crate development with observational/simulation-driven testing",
   "author": {
     "name": "Toshimi Kawata"
   },
-  "repository": "https://github.com/t-kawata/ecc-mycute",
+  "repository": "https://github.com/t-kawata/ecc-darvium",
   "license": "MIT",
   "keywords": [
     "claude-code",
-    "mycute",
+    "darvium",
     "agents",
     "skills",
     "hooks",
     "rules",
     "rust",
-    "tauri"
+    "observational-testing",
+    "simulation",
+    "calibration"
   ]
 }

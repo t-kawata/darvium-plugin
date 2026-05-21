@@ -213,58 +213,9 @@ fn dispatch_command(state: &AppState, cmd: Command) -> Result<Response, Error> {
 - コメント（日本語）→ **「なぜこの設計を選んだか」「どのような制約があるか」** を説明する
 - 翻訳可能性の低いコードをコメントで補おうとしてはならない。コード自体を改善するのが唯一の正しい方法
 
-## MYCUTE-Specific Prohibitions
-
-### Result 伝播の徹底（防弾設計）
-- すべての `main` 関数およびエントリポイントは `Result` を返し、エラーを最上位で集中管理する
-- `unwrap()` / `expect()` を実務コードで使用してはならない（テストコードと静的に到達不能な箇所のみ許可）
-- 正規表現は `Regex::new(...).unwrap()` ではなく `Lazy<Result<Regex, Error>>` パターンで安全に初期化する
-
-```rust
-use once_cell::sync::Lazy;
-use regex::Regex;
-
-static RE: Lazy<Result<Regex, regex::Error>> = Lazy::new(|| Regex::new(r"^\d+$"));
-
-// Usage
-if let Ok(ref re) = *RE {
-    if re.is_match(input) {
-        // ...
-    }
-}
-```
-
-### 単一メソッドチェーンの不必要な改行禁止
-メソッドチェーンが1つのみ（例：`.map_err()` のみ）の場合、構造のシンプルさを優先し必ず1行で記述する。
-
-```rust
-// NG: 1つのメソッドチェーンなのに改行
-std::fs::write(&path, &data)
-    .map_err(|e| Error::Io(e.to_string()))?;
-
-// OK: 1行で記述
-std::fs::write(&path, &data).map_err(|e| Error::Io(e.to_string()))?;
-```
-
-メソッドチェーンが2つ以上繋がる場合は各ドットで改行して複数行に分けることを推奨。
-
-### 曖昧な型と catch-all (_) による処理の禁止
-`String` 等の広すぎる型で分岐し `_`（catch-all）で一括処理してはならない。必ず `enum` を定義し全ケースを網羅すること。
-
-### 完全修飾名によるインポートの省略禁止
-`crate::path::to::Type` をコード中に直接書かない。必ずファイル冒頭で `use` する。
-
-### 関数内での `use` 文の使用禁止
-`use` 文は原則としてファイルのトップレベルに記述する。関数内部での `use` は、名前の衝突回避など明確な意図がある場合のみ許可。
-
-### 環境変数は `main_of_rt.rs` で一元管理
-
-環境変数の直接参照（`std::env::var`）は `main_of_rt.rs` の起動時設定ブロックのみで行う。BL/Handler 層での環境変数直接呼び出しは禁止：
-
-- 新しい設定項目は設定用構造体（`Config`）にフィールドを追加
-- `main_of_rt.rs` の環境変数収集ブロックで読み込み
-- 設定値は `Arc<Config>` 等の引数で各コンポーネントに伝搬
-
 ## References
+
+See skill: `rust-patterns` for comprehensive Rust idioms and patterns.
+See `rules/rust/coding-style.md` for Darvium-specific conventions.
 
 See skill: `rust-patterns` for comprehensive Rust idioms and patterns.

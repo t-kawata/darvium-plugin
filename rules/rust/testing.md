@@ -138,49 +138,205 @@ cargo llvm-cov --html                # HTML report
 cargo llvm-cov --fail-under-lines 80 # Fail if below threshold
 ```
 
-## Testing Commands (MYCUTE)
+## 観測テストパラダイム (Observational Testing Paradigm)
 
-MYCUTE プロジェクトでは Makefile が存在するため、テストは必ず `make` 経由で実行する：
+**これはソフトウェアテストではない。これは自然科学・複雑系科学・統計学を基盤とした実験装置である。**
+Darvium における「テスト」という語は慣習的な呼称であり、その実体は仮説駆動型の計算機実験。
+アサーションは不変条件の検証に限定し、それ以外の振る舞いの評価は統計的観測で分析する。
 
-```bash
-# 全テスト実行（推奨）
-make test
+### 目的
+「テスト」の目的は「正しさの確認」ではなく「振る舞いの特徴付け」である。
+不変条件（DAG性、状態遷移禁止、境界値超過）は `assert!` で検証するが、確率的要素を含む出力の評価は観測（統計的集計・分布出力）で行う。
 
-# 特定パッケージのテスト
-make test TEST_ARGS="--package mycute-server-core --lib"
-
-# 全テスト（明示的）
-make test-all
-```
-
-Makefile が参照できない特殊な状況でのみ、直接 `cargo test` を使用すること。
-
-## MYCUTE テスト注意点
-
-- **ネイティブライブラリ依存**: テスト実行前に `make test` は自動的にネイティブライブラリ（Swift SpeechHelper, onnxruntime, sherpa-onnx）のビルド依存を解決する。`cargo test` を直接実行した場合、これらのリンクに失敗する可能性がある
-- **テストの配置**:
-  - Unit tests: 各モジュール内の `#[cfg(test)] mod tests`
-  - Integration tests: `tests/` ディレクトリ
-- **テストコードでも `unwrap()` を避けること**: テスト関数は `Result<()>` を返し `?` 演算子でエラー伝播すること。パニック依存のテストは極小に留める
-- **非同期テスト**: `#[tokio::test]` を使用する。MYCUTE は Tokio ランタイムで動作する
+### 出力形式
+観測テストは `println!` で構造化テキストを `--nocapture` 経由で標準出力に書き出す：
 
 ```rust
-// GOOD: Result を返すテスト
-#[tokio::test]
-async fn test_find_user() -> Result<(), DbErr> {
-    let user = find_user_by_id(42).await?;
-    assert_eq!(user.name, "Alice");
-    Ok(())
+// 観測テストの出力例
+=== Experiment: trust_decay_calibration ===
+Config: TRUST_INHERIT_DECAY=0.70, iterations=10000, seed=12345
+Results:
+  mean=0.687, std=0.042, min=0.512, max=0.743
+  p25=0.661, p50=0.690, p75=0.718, p95=0.742, p99=0.743
+  convergence_iters=147
+Status: OBSERVED (no assertion)
+Interpretation: Target steady-state [0.65, 0.70] achieved. Convergence within spec.
+```
+
+### サンプルサイズ基準
+- 分布同定: n >= 10,000
+- ドリフト検出: n >= 1,000
+- 収束測定: n >= 500
+
+### 固定シード PRNG
+全ての確率的テストは固定シード PRNG を使用し、完全再現を保証する：
+
+```rust
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+let mut rng = StdRng::seed_from_u64(12345);
+// rng を使った全ての操作は再現可能
+```
+
+### アサーションと観測の使い分け
+
+| 対象 | 方法 | 例 |
+|------|------|-----|
+| 不変条件（DAG性、禁止遷移） | `assert!` / `assert_eq!` | サイクル検出が常に真 |
+| 境界値（予算上限、深さ上限） | `assert_eq!` エラー型一致 | `Err(SearchBudgetExceeded)` |
+| エラー型の網羅性 | コンパイル時チェック | match の exhaustive |
+| パラメータ感受性 | 観測（分布出力） | 減衰率変更時の収束速度変化 |
+| ノイズ頑健性 | 観測（統計的集計） | ランキングドリフト分布 |
+| 較正 | 観測（実験系列） | J(θ) 値の反復推移 |
+
+## Fake-First 方法論
+
+全ての外部依存は `PortTrait` として定義し、`FakeImpl` を本物より先に書く：
+
+```rust
+// 1. PortTrait の定義（src/ports.rs）
+pub trait RetrievalPrimitive: Send + Sync {
+    fn search(&self, query: &QueryRepresentation) -> Result<CandidateSet, RetrievalError>;
 }
 
-// BAD: unwrap に依存するテスト
-#[tokio::test]
-async fn test_find_user_bad() {
-    let user = find_user_by_id(42).await.unwrap();
-    assert_eq!(user.name, "Alice");
+// 2. FakeImpl の定義（src/fakes.rs または tests/fakes.rs）
+pub struct FakeRetrieval {
+    deterministic_result: CandidateSet,
+    call_count: Arc<AtomicUsize>,
+}
+
+impl FakeRetrieval {
+    pub fn new(result: CandidateSet) -> Self {
+        Self { deterministic_result: result, call_count: Arc::new(AtomicUsize::new(0)) }
+    }
+}
+
+impl RetrievalPrimitive for FakeRetrieval {
+    fn search(&self, _query: &QueryRepresentation) -> Result<CandidateSet, RetrievalError> {
+        self.call_count.fetch_add(1, Ordering::SeqCst);
+        Ok(self.deterministic_result.clone())
+    }
 }
 ```
+
+原則：
+- FakeImpl は決定論的でなければならない（隠れた乱数状態を持たない）
+- コールカウンタ（`Arc<AtomicUsize>`）を付与し、意図しない呼び出しが発生していないことをテストで確認する
+- エラー注入用の FakeImpl（`FakeRetrievalAlwaysError`）も用意する
+
+## 固定シード PRNG テスト
+
+全ての確率的テストは `StdRng::seed_from_u64(12345)` を標準シードとして統一する：
+
+```rust
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+#[test]
+fn ranking_drift_robustness() {
+    let mut rng = StdRng::seed_from_u64(12345);
+
+    // Gaussian ノイズ注入によるランキングドリフトテスト（1000 イテレーション）
+    let mut top_selections = Vec::with_capacity(1000);
+    for _ in 0..1000 {
+        let noise: f64 = rng.sample(rand::distributions::StandardNormal);
+        let drifted_score = 0.70 + noise * 0.05; // N(0.70, 0.05)
+        top_selections.push(drifted_score);
+    }
+
+    // 出力（観測）— assert 不要、分布として観察
+    println!("=== Ranking Drift Test ===");
+    println!("samples={}, seed=12345", top_selections.len());
+    // ... 統計集計と出力
+}
+```
+
+## プロパティベーステスト (proptest)
+
+不変条件の網羅的検証には proptest を使用する：
+
+```rust
+use proptest::prelude::*;
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 1000,
+        .. ProptestConfig::default()
+    })]
+
+    #[test]
+    fn cycle_detection_catches_all_cycles(edges in prop::collection::vec(
+        (0..100usize, 0..100usize), 1..50
+    )) {
+        let mut graph = WorkflowGraph::new();
+        let has_cycle = detect_cycle(&graph);
+        // 不変条件: サイクルがあれば必ず検出する
+        assert!(has_cycle || !has_cycle_actual);
+    }
+}
+```
+
+## 決定論的リプレイ検証
+
+同一入力 + 同一シードでビットレベル一致することを確認する：
+
+```rust
+#[test]
+fn search_trace_deterministic_replay() {
+    let seed = 12345u64;
+    let trace1 = run_search_engine(MISSION_A, seed);
+    let trace2 = run_search_engine(MISSION_A, seed);
+
+    assert_eq!(
+        trace1.hash(),
+        trace2.hash(),
+        "SearchTrace MUST be bit-identical across independent runs with same seed"
+    );
+}
+```
+
+このテストは特に M2.5-2 で要求されている。
+
+## 較正ループ方法論
+
+パラメータ調整は以下の実験サイクルで行う：
+
+1. **仮説**: 「TRUST_INHERIT_DECAY を 0.70 → 0.80 に変更すると収束時間が20%短縮される」
+2. **設定変更**: `src/constants.rs` の該当定数を変更
+3. **テスト実行**: `cargo test --test m_minus1 -- --nocapture`
+4. **観測記録**: 収束速度、定常誤差、CAS 競合率などを記録
+5. **解釈**: 仮説と比較、効果量を計算
+6. **記録**: 実験ID・親ID・結果・解釈を系列として保存
+7. **反復**: 次の仮説に進む
+
+各実験サイクルの結果は `rules/darvium/experiment-reporting.md` の形式に従って記録すること。
+
+## マイルストーン別テスト構成
+
+Darvium の13フェーズのテストは以下のディレクトリ構成に従う：
+
+```text
+tests/
+├── m_minus2/       # M-2: 純粋インターフェース・境界値テスト
+├── m_minus1_5/     # M-1.5: 状態機械行き詰まりテスト
+├── m_minus1/       # M-1: FakeExecutor + FakeLlmClient
+├── m_minus0_5/     # M-0.5: PRNGノイズ注入・ランキングドリフト
+├── m0/             # M0: 合成計画検証
+├── m0_5/           # M0.5: プロパティベース・不正形式注入
+├── m1/             # M1: feature gate "integration_llm" で隔離
+├── m1_5/
+├── m2/
+├── ...             # 以降はゲート付き
+└── common/         # 共有テストユーティリティ、FakeImpl 集約
+```
+
+M2 に到達するまでは、ネットワークを切断した状態でも `cargo test` が 100% グリーンかつミリ秒単位で高速作動する状態を維持する。
+M1+ のテストは `#[cfg(feature = "integration_llm")]` で隔離し、通常の `cargo test` では実行されない。
 
 ## References
 
 See skill: `rust-testing` for comprehensive testing patterns including property-based testing, fixtures, and benchmarking with Criterion.
+See `rules/darvium/observational-testing.md` for detailed observational testing patterns.
+See `rules/darvium/simulation-runner.md` for simulation runner architecture.
+See `rules/darvium/calibration-loop.md` for calibration loop methodology.

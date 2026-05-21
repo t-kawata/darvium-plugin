@@ -169,267 +169,256 @@ See skill: `rust-patterns` for comprehensive patterns including ownership, trait
 
 ---
 
-## MYCUTE-Specific Patterns
+## Darvium-Specific Patterns
 
-### Multi-Binary Architecture
+### PortTrait / FakeImpl パターン
 
-MYCUTE は 3 つのバイナリを持つマルチバイナリ構成。`Cargo.toml` の `[[bin]]` 定義に従う：
+Darvium の全外部依存はトレイト（PortTrait）として定義し、テスト用の FakeImpl を本物より先に書く（Fake-First 方法論）。
 
-| Binary | Path | Purpose |
-|--------|------|---------|
-| `mycute` | `src/main.rs` | GUI モード（Tauri）、サーバーモード（ヘッドless）、マイグレーション |
-| `mycute-server-core` | `src/server.rs` | スタンドアロンサーバー本体。GUI 非依存 |
-| `mycute-server` | `src/launcher.rs` | 配布用サーバーバイナリ。core とネイティブライブラリを内包 |
-
-- 共通ロジックは `src/` 直下のモジュールツリーに配置し、各バイナリから参照する
-- `mycute-server`（launcher）は `include_bytes!` で `target/release` の core バイナリを埋め込む。ビルド順序に注意
-
-### Tauri v2 Commands
-
-Tauri コマンドは機能ごとにファイル分割し `src/tauri_cmd/` モジュールに集約する：
+```text
+    Consumer ──> PortTrait <── FakeImpl
+    (lib.rs)     (ports.rs)     (fakes.rs)
+                 Send+Sync      Deterministic
+                 Error types    Call counter
+                       |
+                 RealImpl
+                 (production)
+```
 
 ```rust
-// src/tauri_cmd/voice.rs
-#[tauri::command]
-pub async fn start_recording(app: tauri::AppHandle) -> Result<(), String> {
-    // 実装
+// src/ports.rs — external dependency as trait
+pub trait RetrievalPrimitive: Send + Sync {
+    fn search(&self, query: &QueryRepresentation) -> Result<CandidateSet, RetrievalError>;
 }
 
-// src/tauri_cmd/settings.rs
-#[tauri::command]
-pub async fn get_setting(key: String) -> Result<String, String> {
-    // 実装
+// src/fakes.rs — FakeImpl before production
+pub struct FakeRetrieval {
+    deterministic_result: CandidateSet,
+    call_count: Arc<AtomicUsize>,
 }
-```
 
-- `#[tauri::command]` は async 関数とし、戻り値は `Result<T, String>` またはシリアライズ可能な型
-- フロントエンドからは `invoke('plugin:mycute|command_name')` で呼び出し
-- AppHandle が必要な場合は関数の引数に `app: tauri::AppHandle` を追加
-
-### Axum + utoipa Routing
-
-MYCUTE は utoipa を用いた OpenAPI ドキュメント自動生成と統合したルーティングを行う：
-
-```rust
-use utoipa::OpenApi;
-use utoipa_axum::{router::OpenApiRouter, routes};
-
-#[derive(OpenApi)]
-#[openapi(info(title = "MYCUTE API", version = "1.0.0"))]
-struct ApiDoc;
-
-// utoipa-axum の OpenApiRouter でルートを定義
-let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
-    .nest("/v1", app_routes())
-    .split_for_parts();
-
-// axum 標準の Router にフォールバック
-let app = Router::new()
-    .merge(router);
-```
-
-- **API 定義と実装の一体化**: `#[utoipa::path]` アトリビュートでリクエスト/レスポンススキーマをハンドラーに直接記述
-- **`utoipa-axum` の `routes!` マクロ**を使用してハンドラーを登録
-- 全てのハンドラーは `anyhow::Result` またはカスタムエラー型を返す
-- 状態管理は `axum::extract::State` と `Arc` で行う
-
-```rust
-#[utoipa::path(
-    get,
-    path = "/v1/ca/apply",
-    params(MyRequest),
-    responses(
-        (status = 200, description = "Success"),
-        (status = 400, description = "Bad request"),
-    ),
-)]
-async fn apply_ca(
-    State(state): State<Arc<AppState>>,
-    Query(params): Query<MyRequest>,
-) -> Result<Json<MyResponse>, AppError> {
-    // ...
+impl FakeRetrieval {
+    pub fn new(result: CandidateSet) -> Self {
+        Self {
+            deterministic_result: result,
+            call_count: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+    pub fn call_count(&self) -> usize {
+        self.call_count.load(Ordering::SeqCst)
+    }
 }
-```
 
-### REST API Patterns
-
-#### 実装サイクル
-REST API 開発は **Route → Handler → Request → Response → Logic** の順で進める。インターフェースを先に固めることで設計矛盾を早期発見する。
-
-#### Route 登録
-`src/mode/rt/req_map.rs` に集約：
-
-```rust
-fn app_routes() -> OpenApiRouter {
-    OpenApiRouter::new()
-        .routes(routes!(search_usrs))
-        .routes(routes!(create_usr))
+impl RetrievalPrimitive for FakeRetrieval {
+    fn search(&self, _query: &QueryRepresentation) -> Result<CandidateSet, RetrievalError> {
+        self.call_count.fetch_add(1, Ordering::SeqCst);
+        Ok(self.deterministic_result.clone())
+    }
 }
-```
 
-- `OpenApiRouter::with_openapi(ApiDoc::openapi())` + `.nest("/v1", ...)` + `split_for_parts()`
-- CRUD 順序: Search → Get → Create → Update → Delete
-- 検索系は Body JSON + POST を基本
-
-#### Handler パターン
-`src/mode/rt/rthandler/[機能名]_handler.rs`。認証・委譲のみ：
-
-```rust
-pub async fn search_usrs(
-    ju: JwtUsr, ids: JwtIDs,
-    Extension(db): Extension<Arc<DbPools>>,
-    Json(req): Json<SearchUsrsReq>,
-) -> Result<impl IntoResponse, ApiError> {
-    ju.allow_roles(&[JwtRole::USR])?;
-    req.validate().map_err(|e| ApiError::from_garde(e))?;
-    let conn = db.get_ro_for_rt()?;
-    rtbl::usrs_bl::search_usrs(conn, &ju, &ids, req).await.map(Json)
-}
-```
-
-- `ju.allow_roles` でロール制限（目標は全エンドポイント USR のみ）
-- 読み取り: `get_ro_for_rt()` / 書き込み: `get_rw_for_rt()`
-- ハンドラーファイルごとに `const TAG` を定義
-
-#### Request パターン
-`src/mode/rt/rtreq/[機能名]_req.rs`。`garde` バリデーション：
-
-```rust
-#[derive(Deserialize, Validate, ToSchema)]
-pub struct SearchUsrsReq {
-    #[schema(example = "山田 太郎")]
-    #[serde(default)]
-    #[garde(custom(length_simple_err(0, 50)))]
-    pub name: String,
-}
-```
-
-- `#[schema(example = ...)]` 必須（Swagger UI 用）
-- `#[serde(default)]` でキー欠如対策、`garde` で 422 エラー化
-- 標準 `garde` 属性の直接使用禁止 → カスタムアダプター経由
-
-#### Response パターン
-`src/mode/rt/rtres/[機能名]_res.rs`。フラット構造＋`From<Model>`：
-
-```rust
-#[derive(Serialize, ToSchema)]
-pub struct SearchUsrsRes { pub usrs: Vec<SearchUsrsResItem> }
-impl From<usrs::Model> for SearchUsrsResItem { /* ... */ }
-```
-
-- エラーは `ApiError`（`ErrorDetail { field, code, message }` のリスト）で統一
-- 成功レスポンスに errors フィールドを含めない
-
-#### Business Logic パターン
-`src/mode/rt/rtbl/[機能名]_bl.rs`。非同期 SeaORM：
-
-```rust
-async fn find_usrs_base(ju: &JwtUsr, ids: &JwtIDs) -> Result<Select<usrs::Entity>, ApiError> {
-    match ju.role() {
-        JwtRole::USR => Ok(usrs::Entity::find()
-            .filter(usrs::Column::ApxId.eq(ids.apx_id))
-            .filter(usrs::Column::VdrId.eq(ids.vdr_id))
-            .filter(usrs::Column::Id.eq(ids.usr_id))),
+// Error-injection FakeImpl
+pub struct FakeRetrievalAlwaysError;
+impl RetrievalPrimitive for FakeRetrievalAlwaysError {
+    fn search(&self, _query: &QueryRepresentation) -> Result<CandidateSet, RetrievalError> {
+        Err(RetrievalError::Internal("simulated error".into()))
     }
 }
 ```
 
-- `find_..._base` で権限ベースのクエリ共通化（Search/Get/Update/Delete で再利用）
-- Create/Update/Delete は `conn.transaction()` でラップ
-- `ju.role()` + `match` でロール判定を明示
+原則：
+- FakeImpl は **決定論的** でなければならない（隠れた乱数状態を持たない）
+- コールカウンタ（`Arc<AtomicUsize>`）を付与し、意図しない呼び出しをテストで検出する
+- エラー注入用の FakeImpl も用意し、異常系の観測テストを可能にする
+- PortTrait は `Send + Sync` を継承し、`SimulationRunner` からの並行呼び出しに対応する
 
-#### バリデーションアダプター
-`garde` カスタムアダプターは4段階のマクロ生成で追加：
+### Darvium Facade パターン
 
-1. **基底ロジック**: 判定用トレイト定義（`rterr.rs`）
-2. **汎用マクロ**: `define_numeric_adapter!` 等（`validators.rs`）
-3. **アダプター実体化**: エラーコード `E0001`〜`E0023` を確定
-4. **リクエスト適用**: `#[garde(custom(numeric_err))]`
-
-エラーコード体系は `src/mode/rt/rterr/` で一元管理する。
-
-#### P2P Clock Sync Middleware
-全 P2P 通信で相互時刻検証を必須化：
-1. リクエストにタイムスタンプ + 署名 + 公開鍵を含める
-2. 受信側はブラックリストチェック後、時刻ズレを検証
-3. 許容範囲超過時は通信拒否、CA へ報告
-4. 応答に受信側タイムスタンプを付与
-
-#### entities/ 直接編集禁止
-`src/entities/` は `make gen-entities` の自動生成ファイルにつき直接編集禁止。スキーマ変更は migration → regenerate の順。
-
-#### ロールポリシー
-全 JWT 認証エンドポイントは `JwtRole::USR` のみ許可を目標とする。BD/APX/VDR ロールは管理機能に限定し、将来的に全廃予定。
-
-### SeaORM Entity Pattern
-
-エンティティは `src/entities/` に `sea-orm-cli generate entity` で自動生成する：
+Darvium の公開 API は単一の Facade 構造体を通して提供する。内部の4層・Training・Fusion は完全カプセル化される。
 
 ```rust
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
-#[sea_orm(table_name = "identities")]
-pub struct Model {
-    #[sea_orm(primary_key)]
-    pub id: i32,
-    pub public_key: String,
-    pub name: Option<String>,
+// src/lib.rs — 唯一の公開エントリポイント
+pub struct Darvium {
+    config: DarviumConfig,
+    layer2: WorkflowLayer,
+    layer3a: RetrievalCore,
+    layer3b: SearchEngine,
+    layer3c: LifecycleManager,
 }
 
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(has_many = "super::apps::Entity")]
-    Apps,
+impl Darvium {
+    pub fn new(config: DarviumConfig) -> Self { /* ... */ }
+    pub fn compile(&self, workflow: WorkflowGraph) -> Result<CompiledPlan, DarviumError> { /* ... */ }
+    pub fn search(&self, query: QueryRepresentation) -> Result<CandidateSet, DarviumError> { /* ... */ }
 }
-
-impl ActiveModelBehavior for ActiveModel {}
 ```
 
-- 自動生成後は手動編集せず、スキーマ変更は migration → regenerate の順で行う
-- `#[sea_orm(column_name = "...")]` によるカラム名上書きは避け、DB のカラム名と Rust のフィールド名は snake_case で一致させる
-- UTC タイムスタンプは `crate::impl_utc_timestamp_behavior!` マクロで適用する
-- `with-serde both` フラグ付きで生成し、Serialize + Deserialize を自動導出する
-
-### Migration Workflow
-
-```bash
-# 1. 新しいマイグレーションファイル生成
-make gen-migration NAME=create_users_table
-
-# 2. マイグレーション実行（スキーマ更新）
-make migrate-up
-
-# 3. スキーマからエンティティ再生成
-make gen-entities DRIVER=sqlite  # または mysql/postgres
-```
-
-- **Schema First アプローチ**: マイグレーションファイルを先に書き、その後エンティティを自動生成する
-- マイグレーション記述は `sea_orm_migration::prelude::*` と `schema::*` ヘルパーを使用
-- マイグレーションの順序はディレクトリのタイムスタンプ順（`YYYYMMDDHHMMSS`）
-
-### Ed448-Goldilocks 暗号パターン
-
-署名・検証は `crate::utils::crypto` モジュールの専用関数を介して行う：
+カプセル化戦略：
+- `src/lib.rs` の `pub` は `Darvium`, `DarviumConfig`, `DarviumError` に限定
+- 内部モジュールは `pub(crate)` でクレート内共有に制限
+- エラー型は `pub use error::DarviumError;` で再公開
+- 内部型（WorkflowNode, QueryRepresentation 等）は必要に応じて pub use で再公開
 
 ```rust
-use crate::utils::crypto::{verify_signature, Ed448Signature};
+// src/lib.rs — re-export pattern
+mod layer2;
+mod layer3a;
+mod ports;
+mod fakes;
+mod constants;
+mod error;
+mod types;
 
-// 署名検証
-let sig: Ed448Signature = /* from hex */;
-let is_valid = verify_signature(&public_key, &data, &sig)?;
+pub use error::DarviumError;
+pub use types::{DarviumConfig, WorkflowGraph, QueryRepresentation, CandidateSet};
 ```
 
-- 公開鍵は 114 文字の Hex 文字列として扱う
-- 生の ed448-goldilocks クレートの API を直接呼ばず、`utils::crypto` のラッパー関数を常に使用する
-- 署名対象データには必ずタイムスタンプと有効期限を含める
+### SimulationRunner パターン
 
-### ポート定義
+N 回の反復実行を行い、統計的集計とレポートを生成するテスト用ランナー：
 
-| 定数名 | ポート | 用途 |
-|--------|--------|------|
-| `RT_PORT` | 3910 | REST API (Axum) |
-| `SW_PORT` | 3911 | Static content / proxy |
-| `BIFROST_PORT` | 3912 | LLM Proxy |
-| `ZEROCLAW_PORT` | 3913 | Agent Gateway |
-| `PROXY_PORT` | 58300 | MITM HTTPS proxy |
+```rust
+pub struct SimulationRunner<P, R> {
+    primitive: P,
+    iterations: usize,
+    results: Vec<R>,
+    seed: u64,
+}
 
-ポート番号はハードコードせず定数として定義し、必要に応じて環境変数で上書き可能にすること。
+impl<P, R> SimulationRunner<P, R>
+where
+    P: RetrievalPrimitive,
+    R: Measurable,
+{
+    pub fn new(primitive: P, iterations: usize) -> Self {
+        Self {
+            primitive,
+            iterations,
+            results: Vec::with_capacity(iterations),
+            seed: 12345,
+        }
+    }
+
+    pub fn run(&mut self, input: &QueryRepresentation) -> &[R] {
+        let mut rng = StdRng::seed_from_u64(self.seed);
+        self.results.clear();
+        for _ in 0..self.iterations {
+            let result = self.primitive.search(input).unwrap();
+            self.results.push(result.measure(&mut rng));
+        }
+        &self.results
+    }
+
+    pub fn report(&self) -> SimulationReport {
+        let stats = collect_statistics(&self.results);
+        SimulationReport {
+            iterations: self.iterations,
+            seed: self.seed,
+            mean: stats.mean,
+            std: stats.std,
+            p50: stats.percentile(50),
+            p95: stats.percentile(95),
+            p99: stats.percentile(99),
+        }
+    }
+}
+```
+
+- `Measurable` トレイトで計測可能な任意の型を抽象化
+- 統計集計は `SimulationReport` 構造体に集約
+- 固定シードで完全再現性を保証
+- マイルストーン別にイテレーション数を設定可能（M-2: 100, M0: 1000, M2: 10000）
+
+### 観測テストハーネスパターン
+
+テスト結果を構造化データとして収集・出力するハーネス：
+
+```rust
+pub struct ObservationalResult {
+    pub experiment_id: String,
+    pub config: HashMap<String, f64>,
+    pub samples: Vec<f64>,
+}
+
+impl ObservationalResult {
+    pub fn report(&self) -> String {
+        let stats = collect_statistics(&self.samples);
+        format!(
+            "=== Experiment: {} ===
+Config: {:?}
+Results:
+               mean={:.3}, std={:.3}, min={:.3}, max={:.3}
+               p25={:.3}, p50={:.3}, p75={:.3}, p95={:.3}, p99={:.3}
+             Status: OBSERVED (no assertion)",
+            self.experiment_id, self.config,
+            stats.mean, stats.std, stats.min, stats.max,
+            stats.percentile(25), stats.percentile(50),
+            stats.percentile(75), stats.percentile(95), stats.percentile(99),
+        )
+    }
+}
+```
+
+### 較正コンフィグパターン
+
+`constants.rs` の定数は RFC セクション番号でグループ化する：
+
+```rust
+// ================ Trust Propagation (§4.2) ================
+pub const TRUST_INHERIT_DECAY: f64 = 0.70;  // RFC §4.2.1
+pub const HUMAN_TRUST_K: f64 = 0.08;        // RFC §4.2.3
+pub const SELF_CONF_DISCOUNT: f64 = 0.85;   // RFC §4.2.4
+
+// ================ Temporal Decay (§4.3) ================
+pub const TEMPORAL_LAMBDA_USE: f64 = 0.0001;     // RFC §4.3.1
+pub const TEMPORAL_LAMBDA_VERIFY: f64 = 0.00005; // RFC §4.3.1
+pub const TEMPORAL_ALPHA_BLEND: f64 = 0.35;      // RFC §4.3.2
+
+// ================ Search Parameters (§5) ================
+pub const GED_BLEND_MARGIN: usize = 5;          // RFC §5.3.2
+pub const MAX_GRAPH_NODES: usize = 10_000;      // RFC §5.1
+pub const MAX_COMPILED_STEPS: usize = 100_000;  // RFC §5.1
+pub const MAX_PATCH_OPS: usize = 1_000;         // RFC §7.2
+pub const MAX_PROMPT_TOKENS: usize = 16_384;    // RFC §3.3
+
+// ================ Test Constants ================
+pub const TEST_PRNG_SEED: u64 = 12345;
+```
+
+### レポート/系列パターン
+
+実験結果の系列（lineage）を構造化して記録する：
+
+```rust
+pub struct ExperimentRecord {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub hypothesis: String,
+    pub config: HashMap<String, f64>,
+    pub results: ObservationalResult,
+    pub interpretation: String,
+    pub next_action: String,
+}
+```
+
+出力形式（機械可読＋人間可読の両立）：
+
+```json
+{
+  "id": "a1b2c3d4-...",
+  "parent_id": "e5f6g7h8-...",
+  "hypothesis": "TRUST_INHERIT_DECAY 0.70 -> 0.80 reduces convergence time 20%",
+  "config": { "TRUST_INHERIT_DECAY": 0.80 },
+  "results": { "mean": 0.687, "std": 0.042, "p50": 0.690, "p95": 0.742 },
+  "interpretation": "Convergence speed 1.2x. Steady-state error within spec.",
+  "next_action": "Test with 0.85"
+}
+```
+
+## References
+
+See skill: `rust-patterns` for comprehensive Rust idioms and patterns.
+See `rules/darvium/observational-testing.md` for detailed observational testing patterns.
+See `rules/darvium/simulation-runner.md` for simulation runner architecture.
+See `rules/darvium/calibration-loop.md` for calibration methodology.
+See `rules/darvium/public-api-design.md` for public API design principles.

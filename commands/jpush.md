@@ -133,7 +133,7 @@ git commit -m "docs: add release notes for <バージョン>"
 git push origin master
 ```
 
-### Step 6: ecc-mycute の変更をコミット＆プッシュ
+### Step 6: Darvium Plugin の変更をコミット＆プッシュ
 
 ```bash
 PUSH_MSG="<Step 3 で生成したコミットメッセージ>" make push

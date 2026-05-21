@@ -52,23 +52,23 @@ description: 実装済みチケットの品質レビュー。/plan-ticket で定
 ### Step 0: 初期化
 
 ```bash
-if [ ! -f ECC_MYCUTE_PLUGIN_ROOT.md ]; then
-  _R="$(node -e "process.stdout.write(process.env.CLAUDE_PLUGIN_ROOT||require('path').join(require('os').homedir(),'.claude','plugins','marketplaces','ecc-mycute-marketplace'))")"
-  echo "$_R" > ECC_MYCUTE_PLUGIN_ROOT.md
+if [ ! -f DARVIUM_PLUGIN_ROOT.md ]; then
+  _R="$(node -e "process.stdout.write(process.env.CLAUDE_PLUGIN_ROOT||require('path').join(require('os').homedir(),'.claude','plugins','marketplaces','ecc-darvium-marketplace'))")"
+  echo "$_R" > DARVIUM_PLUGIN_ROOT.md
 fi
 ```
 
 ### Step 1: 存在確認 + done 確認
 
 ```bash
-_R=$(cat ECC_MYCUTE_PLUGIN_ROOT.md)
+_R=$(cat DARVIUM_PLUGIN_ROOT.md)
 node "$_R/scripts/tickets/resolve-ticket.js" "$ARGUMENTS"
 ```
 
 `exists` が false なら終了。存在すれば status を確認：
 
 ```bash
-_R=$(cat ECC_MYCUTE_PLUGIN_ROOT.md)
+_R=$(cat DARVIUM_PLUGIN_ROOT.md)
 node "$_R/scripts/tickets/check-status.js" "$ARGUMENTS" done
 ```
 
@@ -77,12 +77,12 @@ node "$_R/scripts/tickets/check-status.js" "$ARGUMENTS" done
 ### Step 2: spec + implementation 読み取り
 
 ```bash
-_R=$(cat ECC_MYCUTE_PLUGIN_ROOT.md)
+_R=$(cat DARVIUM_PLUGIN_ROOT.md)
 node "$_R/scripts/tickets/read-artifact.js" "$ARGUMENTS" spec
 ```
 
 ```bash
-_R=$(cat ECC_MYCUTE_PLUGIN_ROOT.md)
+_R=$(cat DARVIUM_PLUGIN_ROOT.md)
 node "$_R/scripts/tickets/read-artifact.js" "$ARGUMENTS" implementation
 ```
 
@@ -91,14 +91,14 @@ spec の Acceptance Criteria と実装サマリを確認する。
 ### Step 3: 静的品質チェック
 
 ```bash
-_R=$(cat ECC_MYCUTE_PLUGIN_ROOT.md)
+_R=$(cat DARVIUM_PLUGIN_ROOT.md)
 node "$_R/scripts/tickets/review/run-quality-checks.js" src/file1.rs src/file2.rs | node "$_R/scripts/tickets/review/generate-report.js"
 ```
 
 ### Step 4: 構造整合性チェック
 
 ```bash
-_R=$(cat ECC_MYCUTE_PLUGIN_ROOT.md)
+_R=$(cat DARVIUM_PLUGIN_ROOT.md)
 node "$_R/scripts/tickets/validate-structure.js"
 ```
 
@@ -113,7 +113,7 @@ node "$_R/scripts/tickets/validate-structure.js"
 全チェック通過後、レビュー結果を `save-artifact.js` にパイプして保存する：
 
 ```bash
-_R=$(cat ECC_MYCUTE_PLUGIN_ROOT.md)
+_R=$(cat DARVIUM_PLUGIN_ROOT.md)
 cat <<'REVIEW_EOF' | node "$_R/scripts/tickets/save-artifact.js" "$ARGUMENTS" review
 # 各チェックの結果（静的品質チェック、構造整合性チェック、翻訳可能性チェックの結果と合否、見つかった問題と修正内容）
 REVIEW_EOF
@@ -126,7 +126,7 @@ REVIEW_EOF
 全チェック通過後：
 
 ```bash
-_R=$(cat ECC_MYCUTE_PLUGIN_ROOT.md)
+_R=$(cat DARVIUM_PLUGIN_ROOT.md)
 node "$_R/scripts/tickets/update-ticket-status.js" "$ARGUMENTS" reviewed
 ```
 
@@ -136,6 +136,6 @@ node "$_R/scripts/tickets/update-ticket-status.js" "$ARGUMENTS" reviewed
 - **重大**: ユーザーに報告して修正方針を相談。差し戻しが必要な場合は implementing に戻す：
 
   ```bash
-  _R=$(cat ECC_MYCUTE_PLUGIN_ROOT.md)
+  _R=$(cat DARVIUM_PLUGIN_ROOT.md)
   node "$_R/scripts/tickets/update-ticket-status.js" "$ARGUMENTS" implementing
   ```

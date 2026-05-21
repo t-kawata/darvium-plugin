@@ -1,4 +1,4 @@
-# MYCUTE Claude Code Config — Makefile
+# Darvium Claude Code Config — Makefile
 # 時系列コメント付きで push まで完了
 
 .PHONY: push

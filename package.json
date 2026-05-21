@@ -1,8 +1,8 @@
 {
-  "name": "mycute-claude-config",
+  "name": "darvium-claude-config",
   "version": "1.0.0",
   "private": true,
-  "description": "MYCUTE-optimized Claude Code configuration — hooks, rules, skills, agents, commands",
+  "description": "Darvium-optimized Claude Code configuration for Rust crate development with observational/simulation-driven testing",
   "license": "MIT",
   "files": [
     "agents/",
