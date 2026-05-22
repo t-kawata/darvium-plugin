@@ -19,7 +19,7 @@ Key research areas:
 ## 絶対正本文書 (参照優先度: RFC > Tickets > TableSpec)
 - `~/shyme/mycute/crates/darvium/Darvium-RFC-0001-Unified-v2.3-final.md`
 - `~/shyme/mycute/crates/darvium/Darvium-Tickets-v2.3.md`
-- `~/shyme/mycute/crates/darvium/Darvium-v2.0-final-table-and-struct-definition-spec.md`
+- `~/shyme/mycute/crates/darvium/Darvium-v2.3-final-table-and-struct-definition-spec.md`
 - `~/shyme/mycute/Cargo.toml` (MYCUTE workspace 構成)
 
 ## Behavior

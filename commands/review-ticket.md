@@ -88,14 +88,47 @@ node "$_R/scripts/tickets/read-artifact.js" "$ARGUMENTS" implementation
 
 spec の Acceptance Criteria と実装サマリを確認する。
 
-### Step 3: 静的品質チェック
+### Step 3: チケット仕様交叉参照
+
+**Darvium-Tickets-v2.3.md** から該当チケットの仕様を読み取り、実装に漏れや矛盾がないかを丁寧に点検する。
+
+```bash
+# Darvium-Tickets-v2.3.md から当該フェーズ・チケットを抽出
+grep -A 50 "^### Phase.*M-[0-9]" "$DARVIUM_ROOT/Darvium-Tickets-v2.3.md" | head -100
+```
+
+確認観点：
+- Acceptance Criteria が全て実装されているか
+- テスト仕様（観測テスト・不変条件テスト）が全て書かれているか
+- 仕様に記載された型・定数・関数が実装と一致しているか
+- 見落としや「後でやる」が残っていないか
+- Tickets と実装の間に不整合がないか
+
+### Step 4: RFC 理論交叉参照
+
+**Darvium-RFC-0001-Unified-v2.3-final.md** を読み返し、実装が全体の理論体系に対して矛盾・不足・衝突の可能性なく安全であるかを点検する。
+
+```bash
+# RFC の該当セクションを読み取り
+head -n 300 "$DARVIUM_ROOT/Darvium-RFC-0001-Unified-v2.3-final.md"
+```
+
+確認観点：
+- 実装が RFC の理論（数式・アルゴリズム・アーキテクチャ）と矛盾していないか
+- Safety Invariant（不変条件）が全て守られているか
+- エラー型が RFC Annex B の定義と一致しているか
+- 定数値が RFC の規定値と一致しているか
+- アーキテクチャ上の衝突（層間の責務混入、依存の逆転等）がないか
+- 本来あるべき状態遷移・ライフサイクルが欠落していないか
+
+### Step 5: 静的品質チェック
 
 ```bash
 _R=$(cat DARVIUM_PLUGIN_ROOT.md)
 node "$_R/scripts/tickets/review/run-quality-checks.js" src/file1.rs src/file2.rs | node "$_R/scripts/tickets/review/generate-report.js"
 ```
 
-### Step 4: 構造整合性チェック
+### Step 6: 構造整合性チェック
 
 ```bash
 _R=$(cat DARVIUM_PLUGIN_ROOT.md)
@@ -104,11 +137,11 @@ node "$_R/scripts/tickets/validate-structure.js"
 
 出力の `valid` が false なら issues を修正してから続行。
 
-### Step 5: 翻訳可能性チェック
+### Step 7: 翻訳可能性チェック
 
 `/plan-ticket` で定義された grep コマンドを全て再実行する。
 
-### Step 6: レビュー報告書の保存
+### Step 8: レビュー報告書の保存
 
 全チェック通過後、レビュー結果を `save-artifact.js` にパイプして保存する：
 
@@ -121,7 +154,7 @@ REVIEW_EOF
 
 これにより、後でチケットを確認したときに「どのようにレビューされ、品質が担保されているか」を追跡できる。
 
-### Step 7: reviewed に遷移
+### Step 9: reviewed に遷移
 
 全チェック通過後：
 
