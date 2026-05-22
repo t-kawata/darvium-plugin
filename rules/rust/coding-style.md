@@ -140,6 +140,43 @@ src/
     └── pool.rs
 ```
 
+### Module File Responsibilities
+
+各モジュールファイルの責務を以下の通り明確に区別する：
+
+**`lib.rs`** — クレートの公開インターフェース定義とモジュール宣言に限定する。
+- クレートレベルの属性（`#![...]`）の宣言
+- 全トップレベルモジュールの宣言（`pub mod foo;`）
+- 公開 API の再公開（`pub use crate::foo::Bar;`）
+- Darvium の Facade 構造体定義は `lib.rs` に置いてもよい（ただし構造体宣言とコンストラクタのみ。ロジックは子モジュールへ委譲すること）
+- 上記以外の実装ロジック（関数本体、impl ブロックのメソッド実装、トレイト実装等）を `lib.rs` に書いてはならない
+
+**`mod.rs`** — 子モジュールの宣言と公開のみ。実装ロジックは一切書かない。
+```rust
+// ✅ 良い mod.rs
+pub mod token;
+pub mod middleware;
+
+pub use self::token::TokenValidator;
+pub use self::middleware::AuthMiddleware;
+
+// ❌ 悪い mod.rs — 実装ロジックは別ファイルに書く
+pub fn validate_token(t: &str) -> bool {
+    t.len() > 32  // ← ここに書かず、token.rs に書く
+}
+```
+
+根拠:
+- `mod.rs` に実装を書くと、そのファイルが「モジュールの目次」なのか「実装ファイル」なのかがファイル名から判断できず、可読性を損なう
+- `lib.rs` に実装を書くと、クレート全体の構造把握が困難になり、単一ファイルが肥大化する
+
+例外:
+- モジュール内の構造体・関数が 3 行以下の自明なもののみで、かつ別ファイルに分割すると逆に可読性が低下する場合に限り、`mod.rs` への直接記述を許容する。この場合も必ず `pub use` ではなく実体定義であることをコメントで明示すること。
+
+**子モジュールファイル**（`token.rs`, `middleware.rs` 等）:
+- `mod.rs` から `pub mod` 宣言された子モジュールの実装を記述する
+- 公開する項目は `pub(crate)` または `pub` で修飾し、`mod.rs` 経由で再公開する
+
 ## Visibility
 
 - Default to private; use `pub(crate)` for internal sharing

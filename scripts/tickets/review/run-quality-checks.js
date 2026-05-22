@@ -140,6 +140,7 @@ const CHECKS = {
     name: 'many_params',
     label: 'Functions with many parameters',
     severity: 'minor',
+    severity: 'minor',
     run: (content, filePath) => {
       const results = [];
       const re = /(?:fn|function)\s+\w+\s*\(([^)]*)\)/g;
@@ -151,6 +152,56 @@ const CHECKS = {
           results.push({ line: lineNum, match: `${params.length} params (max: ${CFG.review.maxParams})`, file: filePath });
         }
       }
+      return results;
+    },
+  },
+  checkModRsImpl: {
+    name: 'modrs_impl',
+    label: 'Implementation logic in mod.rs / lib.rs',
+    severity: 'major',
+    run: (content, filePath) => {
+      const fileName = path.basename(filePath);
+      if (fileName !== 'mod.rs' && fileName !== 'lib.rs') return [];
+
+      const results = [];
+      const lines = content.split('\n');
+      const isModRs = fileName === 'mod.rs';
+
+      for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+
+        // Skip blank lines, comments, attributes, module declarations, use statements
+        if (trimmed === '') continue;
+        if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) continue;
+        if (trimmed.startsWith('#!') || trimmed.startsWith('#[')) continue;
+        if (/^pub\s+mod\b/.test(trimmed) || /^mod\b/.test(trimmed)) continue;
+        if (/^pub\s*\([^)]*\)\s+mod\b/.test(trimmed)) continue;
+        if (/^pub\s+use\b/.test(trimmed) || /^use\b/.test(trimmed)) continue;
+        if (/^pub\s*\([^)]*\)\s+use\b/.test(trimmed)) continue;
+
+        // Patterns indicating implementation logic
+        let msg = null;
+        if (/\bfn\s+\w+\s*\(/.test(trimmed)) {
+          msg = 'Function definition';
+        } else if (isModRs && /\bstruct\s+\w+/.test(trimmed)) {
+          msg = 'Struct definition';
+        } else if (isModRs && /\benum\s+\w+/.test(trimmed)) {
+          msg = 'Enum definition';
+        } else if (/\bimpl\b/.test(trimmed)) {
+          msg = 'Impl block';
+        } else if (isModRs && /\btrait\s+\w+/.test(trimmed)) {
+          msg = 'Trait definition';
+        } else if (isModRs && /\bconst\s+\w+\s*:/.test(trimmed)) {
+          msg = 'Const definition';
+        } else if (isModRs && /\btype\s+\w+\s*=/.test(trimmed)) {
+          msg = 'Type alias';
+        }
+
+        if (msg) {
+          results.push({ line: i + 1, match: msg, file: filePath });
+        }
+      }
+
       return results;
     },
   },
