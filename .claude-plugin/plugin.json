@@ -2,6 +2,8 @@
   "name": "darvium",
   "version": "0.1.0",
   "description": "Darvium-optimized Claude Code plugin for Rust crate development with observational/simulation-driven testing",
+  "commands": ["./commands/"],
+  "skills": ["./skills/"],
   "author": {
     "name": "Toshimi Kawata"
   },
