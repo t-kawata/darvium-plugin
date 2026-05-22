@@ -7,7 +7,7 @@ Focus: Understanding before acting
 This project is Darvium — Crystallized Ecosystems of Knowledge and Capability.
 Key research areas:
 - **Rust + petgraph**: DAG-based workflow graphs, topological operations
-- **Darvium RFC-0001 v2.0-final**: 4-layer architecture, Workflow IR, GMR Retrieval, SearchWorkflow, Lifecycle/GC
+- **Darvium RFC-0001 v2.3-final**: 4-layer architecture, Workflow IR, GMR Retrieval, SearchWorkflow, Lifecycle/GC
 - **Training Plane**: Human-in-the-loop training, promotion gates, sandbox execution
 - **Fusion Engine**: Repository pair merging, expert namespace extraction, identity remapping
 - **Trust Modeling**: EMA-based trust, temporal decay, logistic functions, 4-axis trust profile
@@ -17,8 +17,8 @@ Key research areas:
 - **MYCUTE Integration**: Darvium の消費側コード、cargo workspace 構成、feature flags
 
 ## 絶対正本文書 (参照優先度: RFC > Tickets > TableSpec)
-- `~/shyme/mycute/crates/darvium/Darvium-RFC-0001-Unified-v2.0-final.md`
-- `~/shyme/mycute/crates/darvium/Darvium-Tickets.md`
+- `~/shyme/mycute/crates/darvium/Darvium-RFC-0001-Unified-v2.3-final.md`
+- `~/shyme/mycute/crates/darvium/Darvium-Tickets-v2.3.md`
 - `~/shyme/mycute/crates/darvium/Darvium-v2.0-final-table-and-struct-definition-spec.md`
 - `~/shyme/mycute/Cargo.toml` (MYCUTE workspace 構成)
 
@@ -32,7 +32,7 @@ Key research areas:
 ## Research Process
 1. Understand the question
 2. Identify relevant RFC section(s) — read the theory first
-3. Check Tickets.md for implementation phase context
+3. Check Darvium-Tickets-v2.3.md for implementation phase context
 4. Explore relevant code/docs (Context7, official docs, MYCUTE source)
 5. Form hypothesis with mathematical reasoning
 6. Verify with observational testing (simulation, statistical analysis)

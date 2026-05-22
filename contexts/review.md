@@ -11,7 +11,7 @@ Focus: Quality, observability, correctness, API design
 
 ## Review Checklist (Darvium-specific)
 - [ ] **RFC 無矛盾**: 実装が RFC 該当セクションと矛盾していないか確認
-- [ ] **3文書整合**: Tickets.md / TableSpec.md との不整合がないか確認
+- [ ] **3文書整合**: Darvium-Tickets-v2.3.md / TableSpec.md との不整合がないか確認
 - [ ] **PortTrait/FakeImpl 分離**: 実装コードが PortTrait 経由で依存性注入されているか。FakeImpl が存在するか
 - [ ] **公開 API の MYCUTE 適合性**: `DarviumConfig` → `Darvium::new()` → メソッド呼び出しの形になっているか。`~/shyme/mycute` からの使用に問題ないか
 - [ ] **決定論的リプレイ**: 同一入力＋同一シードで同一結果が得られるか

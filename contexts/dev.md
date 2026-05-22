@@ -16,8 +16,8 @@ Focus: Implementation, coding, building features
 ## 絶対正本文書 (定数パス)
 
 ```text
-DARVIUM_RFC       = ~/shyme/mycute/crates/darvium/Darvium-RFC-0001-Unified-v2.0-final.md
-DARVIUM_TICKETS   = ~/shyme/mycute/crates/darvium/Darvium-Tickets.md
+DARVIUM_RFC       = ~/shyme/mycute/crates/darvium/Darvium-RFC-0001-Unified-v2.3-final.md
+DARVIUM_TICKETS   = ~/shyme/mycute/crates/darvium/Darvium-Tickets-v2.3.md
 DARVIUM_TABLE_SPEC = ~/shyme/mycute/crates/darvium/Darvium-v2.0-final-table-and-struct-definition-spec.md
 DARVIUM_ROOT      = ~/shyme/mycute/crates/darvium/
 MYCUTE_ROOT       = ~/shyme/mycute/
