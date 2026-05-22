@@ -123,10 +123,22 @@ head -n 300 "$DARVIUM_ROOT/Darvium-RFC-0001-Unified-v2.3-final.md"
 
 ### Step 5: 静的品質チェック
 
+#### 5a: run-quality-checks の実行
+
 ```bash
 _R=$(cat DARVIUM_PLUGIN_ROOT.md)
 node "$_R/scripts/tickets/review/run-quality-checks.js" src/file1.rs src/file2.rs | node "$_R/scripts/tickets/review/generate-report.js"
 ```
+
+#### 5b: RFC 既存実装状態検証の再実行（新規）
+
+plan.md の「RFC 既存実装状態検証」セクションを読み、plan 策定時に記録された全ての乖離が実装によって解消されたことを確認する：
+
+1. plan.md の RFC 比較テーブルを読み込む
+2. 各「❌ 乖離あり」フィールドに対して、現在のソースコードが修正されていることを grep で確認する
+3. 1 つでも未修正の乖離があればレビュー不通過（ステータスを implementing に差し戻し）
+
+**追加で、実装者が新たに導入した型（plan に記載のなかった構造体等）についても、RFC 無矛盾性をスポットチェックする。**
 
 ### Step 6: 構造整合性チェック
 
