@@ -154,7 +154,7 @@ function parseTicketsDoc(darviumRoot, labelToIdMap) {
   let current = null;
 
   for (const line of lines) {
-    const ticketMatch = line.match(/^#### ✅ チケット\s+([\w.-]+):\s*(.*)/);
+    const ticketMatch = line.match(/^####\s+.*チケット\s+([\w.-]+):\s*(.*)/);
     if (ticketMatch) {
       if (current) completed.push(current);
       current = {
@@ -167,7 +167,7 @@ function parseTicketsDoc(darviumRoot, labelToIdMap) {
       continue;
     }
 
-    if (current && /^#### (?!✅ チケット)/.test(line)) {
+    if (current && /^#### (?!.*チケット)/.test(line)) {
       completed.push(current);
       current = null;
       continue;
