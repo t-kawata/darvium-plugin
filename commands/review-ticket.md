@@ -42,6 +42,7 @@ description: 実装済みチケットの品質レビュー。/plan-ticket で定
 | `update-ticket-status.js` | `<id> <status>` |
 | `review/run-quality-checks.js` | `<files...>` |
 | `review/generate-report.js` | （stdin経由） |
+| `review/validate-observation.js` | `<id>` |
 | `validate-structure.js` | （なし） |
 | `update-frontmatter.js` | `<id> <key> <val>` |
 | `read-artifact.js` | `<id> <type>` |
@@ -87,6 +88,27 @@ node "$_R/scripts/tickets/read-artifact.js" "$ARGUMENTS" implementation
 ```
 
 spec の Acceptance Criteria と実装サマリを確認する。
+### Step 2.5: 観測テスト完了確認（新規）
+
+observation アーティファクトの存在を確認し、計装が完了していることを検証する：
+
+```bash
+_R=$(cat DARVIUM_PLUGIN_ROOT.md)
+node "$_R/scripts/tickets/read-artifact.js" "$ARGUMENTS" observation
+```
+
+アーティファクトが存在しない場合、以下のエラーを表示し、ステータスを implementing に差し戻す：
+
+```
+❌ エラー: 観察レポート（observation）が保存されていません。
+/start-ticket で計装・観測・較正ループを実行し、観察レポートを保存してからレビューしてください。
+ステータスを implementing に差し戻します。
+```
+
+```bash
+_R=$(cat DARVIUM_PLUGIN_ROOT.md)
+node "$_R/scripts/tickets/update-ticket-status.js" "$ARGUMENTS" implementing
+```
 
 ### Step 3: チケット仕様交叉参照
 
@@ -97,12 +119,18 @@ spec の Acceptance Criteria と実装サマリを確認する。
 grep -A 50 "^### Phase.*M-[0-9]" "$DARVIUM_ROOT/Darvium-Tickets-v2.3.md" | head -100
 ```
 
-確認観点：
+確認観点（従来）：
 - Acceptance Criteria が全て実装されているか
 - テスト仕様（観測テスト・不変条件テスト）が全て書かれているか
 - 仕様に記載された型・定数・関数が実装と一致しているか
 - 見落としや「後でやる」が残っていないか
 - Tickets と実装の間に不整合がないか
+
+確認観点（追加：観測ベース検証）：
+- 「計装方法・観測対象」が全て実装されているか
+- `--nocapture` で観測データが出力されるか
+- 較正ループが最低1回実行されたか
+- 観察レポートが observation-*.md として保存されているか
 
 ### Step 4: RFC 理論交叉参照
 
@@ -140,6 +168,18 @@ plan.md の「RFC 既存実装状態検証」セクションを読み、plan 策
 
 **追加で、実装者が新たに導入した型（plan に記載のなかった構造体等）についても、RFC 無矛盾性をスポットチェックする。**
 
+
+### Step X: 観測検証（新規）
+
+```bash
+_R=$(cat DARVIUM_PLUGIN_ROOT.md)
+node "$_R/scripts/tickets/review/validate-observation.js" "$ARGUMENTS"
+```
+
+出力の `valid` が false の場合、issues を確認する。
+- 軽微な欠落（例: 目的関数の評価が未記入）→ AI が補完してよい
+- 重大な欠落（例: 観測テスト実行結果がない）→ implementing に差し戻し
+
 ### Step 6: 構造整合性チェック
 
 ```bash
@@ -160,11 +200,31 @@ node "$_R/scripts/tickets/validate-structure.js"
 ```bash
 _R=$(cat DARVIUM_PLUGIN_ROOT.md)
 cat <<'REVIEW_EOF' | node "$_R/scripts/tickets/save-artifact.js" "$ARGUMENTS" review
-# 各チェックの結果（静的品質チェック、構造整合性チェック、翻訳可能性チェックの結果と合否、見つかった問題と修正内容）
+# 各チェックの結果（静的品質チェック、構造整合性チェック、翻訳可能性チェック、観測検証の結果と合否、見つかった問題と修正内容）
+
+## 計装・観測検証結果
+- [ ] spec「計装方法・観測対象」が全て実装されている
+- [ ] 観測テストが実行可能である
+- [ ] 較正ループが実行されている（N 回の反復）
+- [ ] 観察レポートが保存されている（observation-*.md）
+- 所見: <検証から得られた気づき>
 REVIEW_EOF
 ```
 
 これにより、後でチケットを確認したときに「どのようにレビューされ、品質が担保されているか」を追跡できる。
+
+
+### Step Z: 実験系列サマリの出力（新規）
+
+```bash
+echo "=== 実験系列サマリ ==="
+for f in $(find "$(pwd)/tickets/context" -name "observation-*.md" -maxdepth 2 2>/dev/null | sort); do
+  echo "--- $f ---"
+  grep -E "^## 4\.|^## 6\." "$f" 2>/dev/null
+done
+```
+
+これで現在のチケットが実験系列の中でどの位置にあり、後続に何を示唆するかを一覧できる。
 
 ### Step 9: reviewed に遷移
 

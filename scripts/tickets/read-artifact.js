@@ -10,6 +10,7 @@ const FIELD_MAP = {
   plan: 'plan_path',
   implementation: 'implementation_path',
   review: 'review_report_path',
+  observation: 'observation_report_path',
 };
 
 function main() {
@@ -18,7 +19,7 @@ function main() {
 
   if (!rawId || !type) {
     console.log(JSON.stringify({ success: false, error: 'Usage: node read-artifact.js <ticket_id> <type>' }));
-    console.error('type: spec | plan | implementation | review');
+    console.error('type: spec | plan | implementation | review | observation');
     process.exit(1);
   }
 
@@ -43,7 +44,7 @@ function main() {
   // それ以外: frontmatter から artifact パスを解決
   const field = FIELD_MAP[type];
   if (!field) {
-    console.log(JSON.stringify({ success: false, error: `Unknown artifact type: "${type}". Expected: spec, plan, implementation, review` }));
+    console.log(JSON.stringify({ success: false, error: `Unknown artifact type: "${type}". Expected: spec, plan, implementation, review, observation` }));
     process.exit(1);
   }
 
