@@ -114,6 +114,15 @@ node "$_R/scripts/tickets/update-ticket-status.js" "$ARGUMENTS" implementing
 
 **Darvium-Tickets-v2.3.md** から該当チケットの仕様を読み取り、実装に漏れや矛盾がないかを丁寧に点検する。
 
+まず `$DARVIUM_ROOT` が未設定の場合、`contexts/dev.md` から解決する。
+
+```bash
+if [ -z "${DARVIUM_ROOT:-}" ]; then
+  _R=$(cat DARVIUM_PLUGIN_ROOT.md)
+  DARVIUM_ROOT=$(node -e "const fs=require('fs'),c=fs.readFileSync('$_R/contexts/dev.md','utf8'),m=c.match(/DARVIUM_ROOT\s*=\s*(.+)/);process.stdout.write(m?m[1].trim().replace(/^~/,require('os').homedir()):'')")
+fi
+```
+
 ```bash
 # Darvium-Tickets-v2.3.md から当該フェーズ・チケットを抽出
 grep -A 50 "^### Phase.*M-[0-9]" "$DARVIUM_ROOT/Darvium-Tickets-v2.3.md" | head -100

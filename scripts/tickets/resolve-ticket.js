@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const {
   validateTicketId,
   resolveAllPaths,
@@ -21,16 +22,20 @@ function main() {
     console.log(JSON.stringify({ success: true, exists: false, ticketId }));
     return;
   }
+  function resolveWithFallback(rawPath, type) {
+    if (!rawPath) return null;
+    const resolved = path.isAbsolute(rawPath) ? rawPath : path.resolve(rawPath);
+    if (fs.existsSync(resolved)) return resolved;
+    // 絶対パスが存在しない場合、slug ベースの規約パスにフォールバックする
+    const fallback = path.join(paths.contextDir, `${type}.md`);
+    if (fs.existsSync(fallback)) return fallback;
+    return resolved;
+  }
+
   const { attrs } = readFrontmatterFromFile(paths.specPath);
-  const planPath = attrs?.plan_path
-    ? (path.isAbsolute(attrs.plan_path) ? attrs.plan_path : path.resolve(attrs.plan_path))
-    : null;
-  const implementationPath = attrs?.implementation_path
-    ? (path.isAbsolute(attrs.implementation_path) ? attrs.implementation_path : path.resolve(attrs.implementation_path))
-    : null;
-  const reviewReportPath = attrs?.review_report_path
-    ? (path.isAbsolute(attrs.review_report_path) ? attrs.review_report_path : path.resolve(attrs.review_report_path))
-    : null;
+  const planPath = resolveWithFallback(attrs?.plan_path, 'plan');
+  const implementationPath = resolveWithFallback(attrs?.implementation_path, 'implementation');
+  const reviewReportPath = resolveWithFallback(attrs?.review_report_path, 'review');
 
   console.log(JSON.stringify({
     success: true,

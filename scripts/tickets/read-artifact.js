@@ -55,7 +55,21 @@ function main() {
     process.exit(1);
   }
 
-  const artifactPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(rawPath);
+  let artifactPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(rawPath);
+  if (!fs.existsSync(artifactPath)) {
+    // 絶対パスが存在しない場合、slug ベースの規約パスにフォールバックする
+    if (type === 'observation') {
+      const ctxDir = paths.contextDir;
+      if (fs.existsSync(ctxDir)) {
+        const files = fs.readdirSync(ctxDir);
+        const obsFile = files.find(f => f === 'observation.md' || (f.startsWith('observation-') && f.endsWith('.md')));
+        if (obsFile) artifactPath = path.join(ctxDir, obsFile);
+      }
+    } else {
+      const fallbackPath = path.join(paths.contextDir, `${type}.md`);
+      if (fs.existsSync(fallbackPath)) artifactPath = fallbackPath;
+    }
+  }
   if (!fs.existsSync(artifactPath)) {
     console.log(JSON.stringify({ success: false, error: `Ticket #${ticketId}: ${type} not yet created at ${artifactPath}` }));
     process.exit(1);

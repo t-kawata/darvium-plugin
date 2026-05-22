@@ -11,6 +11,26 @@ const { loadConfig } = require("./ticket-config");
 
 const CFG = loadConfig();
 
+/**
+ * Darvium crate のルートパスを解決する。
+ * 優先順位: DARVIUM_ROOT 環境変数 > contexts/dev.md の定義 > null
+ */
+function resolveDarviumRoot() {
+  if (process.env.DARVIUM_ROOT) {
+    return path.resolve(process.env.DARVIUM_ROOT);
+  }
+  const devCtxPath = path.join(__dirname, '../../contexts/dev.md');
+  if (fs.existsSync(devCtxPath)) {
+    const content = fs.readFileSync(devCtxPath, 'utf8');
+    const match = content.match(/DARVIUM_ROOT\s*=\s*(.+)/);
+    if (match) {
+      let root = match[1].trim().replace(/^~/, process.env.HOME || '');
+      return path.resolve(root);
+    }
+  }
+  return null;
+}
+
 // ============================================================
 // ID Utilities
 // ============================================================
@@ -713,6 +733,7 @@ function createSpecFile(filePath, ticketId, title, slug, status) {
 
 module.exports = {
   CFG,
+  resolveDarviumRoot,
   validateTicketId,
   formatTicketId,
   findNextTicketId,

@@ -8,6 +8,10 @@ const {
   resolveDarviumRoot,
   buildLabelToIdMap,
   parseTicketsDoc,
+  parseSpecForElements,
+  checkSourceTypes,
+  checkSourceFunctions,
+  checkSpecObservation,
   checkConstants,
   checkErrors,
   checkRfcCrossRef,
@@ -144,6 +148,140 @@ console.log('\n## parseTicketsDoc\n');
     const t3 = result.completed[2];
     assertEq(t3.label, 'M-2-2', 'third ticket label is M-2-2');
     assertEq(t3.ticketId, null, 'unmapped label yields null ticketId');
+  });
+}
+
+// --- parseTicketsDoc excludes non-✅ tickets ---
+console.log('\n## parseTicketsDoc (✅ filtering)\n');
+{
+  const sampleDoc = `# Darvium Tickets
+
+#### ✅ チケット M-2-1: RetrievalPrimitive
+
+* **対象不変条件 / 規範:** §13.4
+
+#### チケット M-1-2: NonCompleted
+
+* **対象不変条件 / 規範:** §99.9
+
+#### ✅ チケット M-2-2: SearchBudget
+
+* **対象不変条件 / 規範:** §13.6`;
+
+  withTempDir(tmpDir => {
+    const docPath = path.join(tmpDir, 'Darvium-Tickets-v2.3.md');
+    fs.writeFileSync(docPath, sampleDoc, 'utf8');
+
+    const result = parseTicketsDoc(tmpDir, {});
+    assert(result !== null, 'parses document');
+    assertEq(result.completed.length, 2, 'excludes non-✅ tickets');
+    assertEq(result.completed[0].label, 'M-2-1', 'first is completed ticket');
+    assertEq(result.completed[1].label, 'M-2-2', 'second is completed ticket');
+  });
+}
+
+// --- parseSpecForElements ---
+console.log('\n## parseSpecForElements\n');
+{
+  const specContent = `---
+ticket_id: 1
+title: Test
+slug: test
+---
+
+## Scope
+
+1. **\`QueryRepresentation\` 構造体の定義**: RFC §9.4
+2. **\`QueryType\` / \`FreshnessRequirement\` 列挙型の定義**
+3. **\`RetrievalPrimitive\` トレイトの定義**: RFC §13.4
+4. **\`fn search_workflows\`** の実装
+
+## Non-scope
+
+None.
+
+## 較正計画
+
+本チケットは調整可能な定数を含まない。較正は不要。`;
+
+  const elements = parseSpecForElements(specContent);
+  assert(elements.types.length > 0, 'extracts types');
+  assert(elements.types.some(t => t.name === 'QueryRepresentation' && t.kind === 'struct'), 'finds QueryRepresentation struct');
+  assert(elements.types.some(t => t.name === 'RetrievalPrimitive' && t.kind === 'trait'), 'finds RetrievalPrimitive trait');
+  assert(elements.types.some(t => t.name === 'QueryType' && t.kind === 'enum'), 'finds QueryType enum');
+  assert(elements.types.some(t => t.name === 'FreshnessRequirement' && t.kind === 'enum'), 'finds FreshnessRequirement enum');
+  assert(elements.functions.includes('search_workflows'), 'extracts function name');
+}
+
+// --- checkSourceTypes ---
+console.log('\n## checkSourceTypes\n');
+{
+  const rEmpty = checkSourceTypes('/tmp', []);
+  assert(rEmpty.passed, 'empty list passes');
+  assertEq(rEmpty.entries.length, 0, 'no entries');
+
+  withTempDir(tmpDir => {
+    const srcDir = path.join(tmpDir, 'src');
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.writeFileSync(path.join(srcDir, 'types.rs'),
+      'pub struct QueryRepresentation;\npub trait RetrievalPrimitive {}\npub enum QueryType {}\n', 'utf8');
+
+    const r = checkSourceTypes(tmpDir, [
+      { name: 'QueryRepresentation', kind: 'struct' },
+      { name: 'RetrievalPrimitive', kind: 'trait' },
+      { name: 'QueryType', kind: 'enum' },
+    ]);
+    assert(r.passed, 'all types found');
+    assertEq(r.entries.length, 3, 'all checked');
+
+    const r2 = checkSourceTypes(tmpDir, [{ name: 'NonExistent', kind: 'struct' }]);
+    assert(!r2.passed, 'missing type fails');
+    assertEq(r2.entries[0].found, false, 'not found');
+  });
+}
+
+// --- checkSourceFunctions ---
+console.log('\n## checkSourceFunctions\n');
+{
+  const rEmpty = checkSourceFunctions('/tmp', []);
+  assert(rEmpty.passed, 'empty list passes');
+
+  withTempDir(tmpDir => {
+    const srcDir = path.join(tmpDir, 'src');
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.writeFileSync(path.join(srcDir, 'lib.rs'),
+      'pub fn search_workflows() {}\npub fn evaluate_candidates() {}\n', 'utf8');
+
+    const r = checkSourceFunctions(tmpDir, ['search_workflows', 'evaluate_candidates']);
+    assert(r.passed, 'all functions found');
+    assertEq(r.entries.length, 2, 'all checked');
+
+    const r2 = checkSourceFunctions(tmpDir, ['missing_fn']);
+    assert(!r2.passed, 'missing function fails');
+  });
+}
+
+// --- checkSpecObservation ---
+console.log('\n## checkSpecObservation\n');
+{
+  const rNoId = checkSpecObservation('/tmp', { ticketId: null });
+  assertEq(rNoId.exists, false, 'no ticketId → exists false');
+
+  withTempDir(tmpDir => {
+    const specsDir = path.join(tmpDir, 'tickets', 'specs');
+    const ctxDir = path.join(tmpDir, 'tickets', 'context', '0001-test-ticket');
+    fs.mkdirSync(ctxDir, { recursive: true });
+    fs.mkdirSync(specsDir, { recursive: true });
+    fs.writeFileSync(path.join(specsDir, '0001-test-ticket.md'),
+      '---\nticket_id: 1\ntitle: Test\nslug: test-ticket\nobservation_report_path: tickets/context/0001-test-ticket/observation.md\n---\n', 'utf8');
+    fs.writeFileSync(path.join(ctxDir, 'observation.md'),
+      '# Observation\n\n## Results\nSome observed data.\n\n## RFC References\n§13.4 some text\n', 'utf8');
+
+    const r = checkSpecObservation(tmpDir, { ticketId: 1 });
+    assert(r.exists, 'observation file found');
+    assert(r.hasContent, 'observation has content');
+    assert(r.lines >= 3, 'sufficient lines');
+    assert(r.rfcRefs.includes('§13.4'), 'RFC ref found');
   });
 }
 
@@ -303,7 +441,7 @@ console.log('\n## checkTicket\n');
   _resetCache();
 
   const tErr = { label: 'M-99-9', title: 'Unknown', ticketId: null, rfcSections: [], scope: '' };
-  const rErr = checkTicket(tErr, '/tmp', '/tmp');
+  const rErr = checkTicket(tErr, '/tmp');
   assertEq(rErr.verdict, 'ERROR', 'null ticketId → ERROR verdict');
   assertEq(rErr.failures.length, 1, 'one failure');
 
@@ -332,7 +470,7 @@ console.log('\n## checkTicket\n');
     fs.writeFileSync(path.join(ctxDir, 'plan.md'), '# Plan', 'utf8');
     fs.writeFileSync(path.join(ctxDir, 'implementation.md'), '# Impl', 'utf8');
     fs.writeFileSync(path.join(ctxDir, 'review.md'), '# Review', 'utf8');
-    fs.writeFileSync(path.join(ctxDir, 'observation-20260522-120000.md'), '# Obs', 'utf8');
+    fs.writeFileSync(path.join(ctxDir, 'observation-20260522-120000.md'), '# Observation\n\n## Results\nSome observed data.\n', 'utf8');
 
     fs.writeFileSync(path.join(tmpDir, 'Darvium-RFC-0001-Unified-v2.3-final.md'), '## 13.4 Content\n', 'utf8');
 
@@ -344,10 +482,13 @@ console.log('\n## checkTicket\n');
       'pub enum DarviumError {\n  SearchValidation,\n}\n', 'utf8');
 
     const t = { label: 'M-2-1', title: 'Test', ticketId: 1, rfcSections: ['§13.4'], scope: 'Test' };
-    const r = checkTicket(t, tmpDir, tmpDir);
+    const r = checkTicket(t, tmpDir);
     assertEq(r.verdict, 'PASS', 'all checks pass → PASS verdict');
     assertEq(r.failures.length, 0, 'no failures');
     assertEq(r.warnings.length, 0, 'no warnings');
+    assert(r.checks.source_types !== undefined, 'includes source_types check');
+    assert(r.checks.source_functions !== undefined, 'includes source_functions check');
+    assert(r.checks.observation_quality !== undefined, 'includes observation_quality check');
   });
 }
 

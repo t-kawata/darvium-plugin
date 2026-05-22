@@ -154,7 +154,7 @@ function parseTicketsDoc(darviumRoot, labelToIdMap) {
   let current = null;
 
   for (const line of lines) {
-    const ticketMatch = line.match(/^####\s+.*チケット\s+([\w.-]+):\s*(.*)/);
+    const ticketMatch = line.match(/^####\s+✅\s+チケット\s+([\w.-]+):\s*(.*)/);
     if (ticketMatch) {
       if (current) completed.push(current);
       current = {
@@ -228,6 +228,303 @@ function checkErrors(ticket, darviumRoot) {
   return { passed: results.every(r => r.found), checked: results };
 }
 
+// ============================================================
+// Deep source code verification helpers
+// ============================================================
+
+/**
+ * spec ファイルのテスト計画からテストケース情報を抽出する。
+ * Markdown テーブルをパースし、ID（# 列または ID 列）と説明を取得する。
+ */
+function parseTestPlan(specContent) {
+  const lines = specContent.split('\n');
+  const testCases = [];
+  const observationTests = [];
+  let inTestPlan = false;
+  let inObsTest = false;
+  let collectingTable = false;
+  let headerRow = null;
+
+  for (const line of lines) {
+    if (line.startsWith('## ')) {
+      const heading = line.slice(3).trim().toLowerCase();
+      inTestPlan = heading.includes('test plan') || heading.includes('テスト計画') || heading.includes('ユニットテスト');
+      inObsTest = heading.includes('観測テスト') || heading.includes('observation test');
+      if (!inTestPlan && !inObsTest) {
+        collectingTable = false;
+        headerRow = null;
+      }
+      continue;
+    }
+
+    // サブセクション (###) の検出
+    if (line.startsWith('### ')) {
+      const subheading = line.slice(3).trim().toLowerCase();
+      inTestPlan = subheading.includes('test plan') || subheading.includes('テスト計画') || subheading.includes('ユニットテスト');
+      inObsTest = subheading.includes('観測テスト') || subheading.includes('observation test') || subheading.includes('ots');
+    }
+
+    // テーブル行の収集
+    if (line.trim().startsWith('|') && (inTestPlan || inObsTest)) {
+      const cells = line.split('|').map(c => c.trim()).filter(c => c !== '');
+      if (cells.length < 2) continue;
+
+      // 区切り行（---|---）をスキップ
+      if (/^-{3,}$/.test(cells[0]) || cells.every(c => /^-{3,}$/.test(c))) {
+        headerRow = null;
+        collectingTable = true;
+        continue;
+      }
+
+      if (!headerRow) {
+        headerRow = cells.map(c => c.toLowerCase());
+        collectingTable = true;
+        continue;
+      }
+
+      if (!collectingTable) continue;
+
+      // ID カラムを検出
+      const idIdx = headerRow.findIndex(h => h === '#' || h === 'id' || h === '# id' || h.includes('id'));
+      const descIdx = headerRow.findIndex(h => h.includes('テスト内容') || h.includes('内容') || h.includes('test') || h.includes('expect'));
+      const desc = descIdx >= 0 && descIdx < cells.length ? cells[descIdx] : '';
+      const id = idIdx >= 0 && idIdx < cells.length ? cells[idIdx] : '';
+
+      if (id || desc) {
+        const entry = {
+          id: id || `test_${testCases.length + 1}`,
+          description: desc,
+        };
+
+        // 観測テスト情報の抽出（サンプルサイズ等）
+        const content = line.toLowerCase();
+        if (content.includes('n >=') || content.includes('sample') || content.includes('サンプル')) {
+          const nMatch = line.match(/n\s*(>=|>|=|:)\s*(\d[\d,]*)/);
+          if (nMatch) entry.sampleSize = parseInt(nMatch[2].replace(/,/g, ''));
+        }
+
+        if (inObsTest || id.toUpperCase().startsWith('OTS')) {
+          entry.type = 'observation';
+          observationTests.push(entry);
+        } else {
+          entry.type = 'unit';
+          testCases.push(entry);
+        }
+      }
+    }
+  }
+
+  return { unitTestCases: testCases, observationTests };
+}
+
+/**
+ * spec ファイルの本文から期待される型・関数・定数およびテスト計画を抽出する。
+ */
+function parseSpecForElements(specContent) {
+  const lines = specContent.split('\n');
+  const types = [];
+  const functions = [];
+  const calibrationConstants = [];
+  let currentSection = null;
+
+  for (const line of lines) {
+    if (line.startsWith('## ')) {
+      currentSection = line.slice(3).trim().toLowerCase();
+      continue;
+    }
+
+    if (currentSection === 'scope') {
+      // 型: **`TypeName` トレイトの定義**
+      const m = line.match(/\*\*`(\w+)`\s*トレイトの定義\*\*/);
+      if (m) { types.push({ name: m[1], kind: 'trait' }); continue; }
+
+      // 型: **`TypeName` 構造体の定義**
+      const m2 = line.match(/\*\*`(\w+)`\s*構造体の定義\*\*/);
+      if (m2) { types.push({ name: m2[1], kind: 'struct' }); continue; }
+
+      // 型: **`TypeName` 列挙型の定義** (単一)
+      const m3 = line.match(/\*\*`(\w+)`\s*列挙型の定義\*\*/);
+      if (m3) { types.push({ name: m3[1], kind: 'enum' }); continue; }
+
+      // 型: **`T1` / `T2` / `T3` 列挙型の定義** (複合)
+      const m4 = line.match(/\*\*`(.+)`\s*列挙型の定義\*\*/);
+      if (m4) {
+        m4[1].split('/').forEach(n => {
+          const t = n.trim().replace(/`/g, '');
+          if (t) types.push({ name: t, kind: 'enum' });
+        });
+        continue;
+      }
+
+      // 関数: `fn function_name`
+      const fnMatch = line.match(/`(fn\s+\w+)`/);
+      if (fnMatch) {
+        const fname = fnMatch[1].replace('fn ', '').trim();
+        if (fname && !functions.includes(fname)) functions.push(fname);
+      }
+    }
+
+    // 定数: 較正セクションで UPPER_CASE の識別子
+    if (currentSection && currentSection.includes('較正')) {
+      const constMatches = line.matchAll(/`([A-Z][A-Z_0-9]+)`/g);
+      for (const cm of constMatches) {
+        const cn = cm[1];
+        if (!calibrationConstants.includes(cn)) calibrationConstants.push(cn);
+      }
+    }
+  }
+
+  const testPlan = parseTestPlan(specContent);
+
+  return { types, functions, calibrationConstants, testPlan };
+}
+
+/**
+ * spec の Test Plan に記載されたテストケースがソースコード内の #[cfg(test)] ブロックに存在するか検証する。
+ */
+function checkTestFunctions(darviumRoot, expectedTestIds) {
+  if (!expectedTestIds || expectedTestIds.length === 0) {
+    return { passed: true, entries: [] };
+  }
+  const srcDir = path.join(darviumRoot, 'src');
+  if (!fs.existsSync(srcDir)) {
+    return { passed: false, entries: expectedTestIds.map(id => ({ id, found: false, file: null, error: 'src/ not found' })) };
+  }
+  const srcFiles = fs.readdirSync(srcDir).filter(f => f.endsWith('.rs'));
+  const entries = [];
+
+  for (const testId of expectedTestIds) {
+    let found = false;
+    let foundFile = null;
+    // テスト ID から期待される関数名パターンを生成
+    // T1-a → t1_a, ots1 → ots1, searchworkflow_oscillation 等
+    const normalizedId = testId.toLowerCase().replace(/[-\s]/g, '_');
+    const patterns = [
+      new RegExp(`fn\\s+${normalizedId.replace(/_/g, '[_\\s]*')}[\\s(_]`),
+      new RegExp(`fn\\s+test_${normalizedId.replace(/_/g, '[_\\s]*')}[\\s(_]`),
+      new RegExp(`fn\\s+${normalizedId.split('_')[0]}[\\s(_]`),
+    ];
+
+    for (const file of srcFiles) {
+      const content = fs.readFileSync(path.join(srcDir, file), 'utf8');
+      for (const regex of patterns) {
+        if (regex.test(content)) {
+          found = true;
+          foundFile = file;
+          break;
+        }
+      }
+      if (found) break;
+    }
+    entries.push({ id: testId, found, file: foundFile });
+  }
+  return { passed: entries.every(e => e.found), entries };
+}
+
+/**
+ * 期待される型定義がソースコードに存在するか検証する。
+ */
+function checkSourceTypes(darviumRoot, expectedTypes) {
+  if (!expectedTypes || expectedTypes.length === 0) {
+    return { passed: true, entries: [] };
+  }
+  const srcDir = path.join(darviumRoot, 'src');
+  if (!fs.existsSync(srcDir)) {
+    return { passed: false, entries: expectedTypes.map(t => ({ ...t, found: false, file: null, error: 'src/ not found' })) };
+  }
+  const srcFiles = fs.readdirSync(srcDir).filter(f => f.endsWith('.rs'));
+  const entries = [];
+
+  for (const t of expectedTypes) {
+    let found = false;
+    let foundFile = null;
+    for (const file of srcFiles) {
+      const content = fs.readFileSync(path.join(srcDir, file), 'utf8');
+      const regex = new RegExp(`pub\\s+(?:struct|trait|enum)\\s+${t.name}\\b`);
+      if (regex.test(content)) {
+        found = true;
+        foundFile = file;
+        break;
+      }
+    }
+    entries.push({ name: t.name, kind: t.kind, found, file: foundFile });
+  }
+  return { passed: entries.every(e => e.found), entries };
+}
+
+/**
+ * 期待される関数がソースコードに存在するか検証する。
+ */
+function checkSourceFunctions(darviumRoot, expectedFunctions) {
+  if (!expectedFunctions || expectedFunctions.length === 0) {
+    return { passed: true, entries: [] };
+  }
+  const srcDir = path.join(darviumRoot, 'src');
+  if (!fs.existsSync(srcDir)) {
+    return { passed: false, entries: expectedFunctions.map(f => ({ name: f, found: false, file: null, error: 'src/ not found' })) };
+  }
+  const srcFiles = fs.readdirSync(srcDir).filter(f => f.endsWith('.rs'));
+  const entries = [];
+
+  for (const fn of expectedFunctions) {
+    let found = false;
+    let foundFile = null;
+    for (const file of srcFiles) {
+      const content = fs.readFileSync(path.join(srcDir, file), 'utf8');
+      const fnRegex = new RegExp(`fn\\s+${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+      if (fnRegex.test(content)) {
+        found = true;
+        foundFile = file;
+        break;
+      }
+    }
+    entries.push({ name: fn, found, file: foundFile });
+  }
+  return { passed: entries.every(e => e.found), entries };
+}
+
+/**
+ * observation ファイルを読み、品質を確認する。
+ */
+function checkSpecObservation(darviumRoot, ticket) {
+  if (!ticket.ticketId) {
+    return { exists: false, lines: 0, hasContent: false, rfcRefs: [] };
+  }
+  const prefix = String(ticket.ticketId).padStart(4, '0');
+  const specsDir = path.join(darviumRoot, 'tickets', 'specs');
+  if (!fs.existsSync(specsDir)) return { exists: false, lines: 0, hasContent: false, rfcRefs: [] };
+  const specFiles = fs.readdirSync(specsDir).filter(f => f.startsWith(prefix) && f.endsWith('.md'));
+  if (specFiles.length === 0) return { exists: false, lines: 0, hasContent: false, rfcRefs: [] };
+  const { attrs } = parseFrontmatter(fs.readFileSync(path.join(specsDir, specFiles[0]), 'utf8'));
+  if (!attrs || !attrs.slug) return { exists: false, lines: 0, hasContent: false, rfcRefs: [] };
+
+  const slug = attrs.slug;
+  const contextDir = path.join(darviumRoot, 'tickets', 'context', `${prefix}-${slug}`);
+  let obsPath = null;
+  // observation.md を検索（observation-*.md 形式も互換性のためにサポート）
+  if (fs.existsSync(contextDir)) {
+    const files = fs.readdirSync(contextDir);
+    const obsFile = files.find(f => f === 'observation.md' || (f.startsWith('observation-') && f.endsWith('.md')));
+    if (obsFile) obsPath = path.join(contextDir, obsFile);
+  }
+
+  if (!obsPath || !fs.existsSync(obsPath)) {
+    return { exists: false, lines: 0, hasContent: false, rfcRefs: [] };
+  }
+
+  const obsContent = fs.readFileSync(obsPath, 'utf8');
+  const obsLines = obsContent.split('\n').filter(l => l.trim().length > 0).length;
+  const hasContent = obsLines >= 3;
+  const rfcRefs = [];
+  const refRegex = /§([\dA-Za-z.]+)/g;
+  let refMatch;
+  while ((refMatch = refRegex.exec(obsContent)) !== null) {
+    rfcRefs.push('§' + refMatch[1]);
+  }
+
+  return { exists: true, lines: obsLines, hasContent, rfcRefs };
+}
+
 function checkRfcCrossRef(ticket, darviumRoot) {
   if (!ticket.rfcSections || ticket.rfcSections.length === 0) {
     return { passed: true, checked: [] };
@@ -245,12 +542,12 @@ function checkRfcCrossRef(ticket, darviumRoot) {
   return { passed: results.every(r => r.found), checked: results };
 }
 
-function checkArtifacts(ticket, pluginRoot) {
+function checkArtifacts(ticket, darviumRoot) {
   if (!ticket.ticketId) {
     return { plan: false, implementation: false, review: false, observation: false, observationCount: 0 };
   }
   const prefix = String(ticket.ticketId).padStart(4, '0');
-  const specsDir = path.join(pluginRoot, 'tickets', 'specs');
+  const specsDir = path.join(darviumRoot, 'tickets', 'specs');
   if (!fs.existsSync(specsDir)) {
     return { plan: false, implementation: false, review: false, observation: false, observationCount: 0 };
   }
@@ -264,32 +561,31 @@ function checkArtifacts(ticket, pluginRoot) {
     return { plan: false, implementation: false, review: false, observation: false, observationCount: 0 };
   }
 
-  const planPath = attrs.plan_path ? path.resolve(pluginRoot, attrs.plan_path) : null;
-  const implPath = attrs.implementation_path ? path.resolve(pluginRoot, attrs.implementation_path) : null;
-  const reviewPath = attrs.review_report_path ? path.resolve(pluginRoot, attrs.review_report_path) : null;
-
-  const plan = planPath ? fs.existsSync(planPath) : false;
-  const implementation = implPath ? fs.existsSync(implPath) : false;
-  const review = reviewPath ? fs.existsSync(reviewPath) : false;
-
   const slug = attrs.slug || 'untitled';
-  const contextDir = path.join(pluginRoot, 'tickets', 'context', `${prefix}-${slug}`);
+  const contextDir = path.join(darviumRoot, 'tickets', 'context', `${prefix}-${slug}`);
+
+  const plan = fs.existsSync(path.join(contextDir, 'plan.md'));
+  const implementation = fs.existsSync(path.join(contextDir, 'implementation.md'));
+  const review = fs.existsSync(path.join(contextDir, 'review.md'));
+
   let observationCount = 0;
   if (fs.existsSync(contextDir)) {
     const files = fs.readdirSync(contextDir);
-    observationCount = files.filter(f => f.startsWith('observation-') && f.endsWith('.md')).length;
+    observationCount = files.filter(f =>
+      f === 'observation.md' || (f.startsWith('observation-') && f.endsWith('.md'))
+    ).length;
   }
   const observation = observationCount > 0;
 
   return { plan, implementation, review, observation, observationCount };
 }
 
-function checkAcceptance(ticket, pluginRoot) {
+function checkAcceptance(ticket, darviumRoot) {
   if (!ticket.ticketId) {
     return { passed: true, defined: 0 };
   }
   const prefix = String(ticket.ticketId).padStart(4, '0');
-  const specsDir = path.join(pluginRoot, 'tickets', 'specs');
+  const specsDir = path.join(darviumRoot, 'tickets', 'specs');
   if (!fs.existsSync(specsDir)) return { passed: true, defined: 0 };
   const specFiles = fs.readdirSync(specsDir).filter(f => f.startsWith(prefix) && f.endsWith('.md'));
   if (specFiles.length === 0) return { passed: true, defined: 0 };
@@ -299,7 +595,7 @@ function checkAcceptance(ticket, pluginRoot) {
   return { passed: true, defined: criteriaLines.length };
 }
 
-function checkTicket(ticket, darviumRoot, pluginRoot) {
+function checkTicket(ticket, darviumRoot) {
   if (!ticket.ticketId) {
     return {
       label: ticket.label,
@@ -315,15 +611,40 @@ function checkTicket(ticket, darviumRoot, pluginRoot) {
         rfc_crossref: { passed: true, checked: [] },
         constants: { passed: true, checked: [] },
         errors: { passed: true, checked: [] },
+        source_types: { passed: true, entries: [] },
+        source_functions: { passed: true, entries: [] },
+        observation_quality: { exists: false, lines: 0, hasContent: false, rfcRefs: [] },
+        test_functions: { passed: true, entries: [] },
       },
     };
   }
 
-  const artifacts = checkArtifacts(ticket, pluginRoot);
-  const acceptance = checkAcceptance(ticket, pluginRoot);
+  const artifacts = checkArtifacts(ticket, darviumRoot);
+  const acceptance = checkAcceptance(ticket, darviumRoot);
   const rfcResult = checkRfcCrossRef(ticket, darviumRoot);
   const constResult = checkConstants(ticket, darviumRoot);
   const errResult = checkErrors(ticket, darviumRoot);
+
+  // Deep source code analysis
+  const prefix = String(ticket.ticketId).padStart(4, '0');
+  const specsDir = path.join(darviumRoot, 'tickets', 'specs');
+  const specFiles = fs.existsSync(specsDir) ? fs.readdirSync(specsDir).filter(f => f.startsWith(prefix) && f.endsWith('.md')) : [];
+  let specElements = { types: [], functions: [], calibrationConstants: [], testPlan: { unitTestCases: [], observationTests: [] } };
+  if (specFiles.length > 0) {
+    const specContent = fs.readFileSync(path.join(specsDir, specFiles[0]), 'utf8');
+    specElements = parseSpecForElements(specContent);
+  }
+
+  const sourceTypes = checkSourceTypes(darviumRoot, specElements.types);
+  const sourceFunctions = checkSourceFunctions(darviumRoot, specElements.functions);
+  const observationQuality = checkSpecObservation(darviumRoot, ticket);
+
+  // Test function verification
+  const allTestIds = [
+    ...(specElements.testPlan?.unitTestCases || []).map(t => t.id),
+    ...(specElements.testPlan?.observationTests || []).map(t => t.id),
+  ];
+  const testResult = checkTestFunctions(darviumRoot, allTestIds);
 
   const failures = [];
   const warnings = [];
@@ -334,9 +655,17 @@ function checkTicket(ticket, darviumRoot, pluginRoot) {
   if (!rfcResult.passed) failures.push('rfc_crossref_failed');
   if (!errResult.passed) failures.push('errors_check_failed');
 
+  // Deep source check failures
+  if (!sourceTypes.passed) failures.push('source_types_mismatch');
+  if (!sourceFunctions.passed) failures.push('source_functions_mismatch');
+  if (!testResult.passed) failures.push('test_functions_mismatch');
+
   if (failures.length === 0) {
     if (!artifacts.observation) warnings.push('missing_observation');
     if (!constResult.passed) warnings.push('constants_check_failed');
+    if (!observationQuality.exists) warnings.push('observation_file_missing');
+    else if (!observationQuality.hasContent) warnings.push('observation_file_empty');
+    if (!testResult.passed) warnings.push('test_functions_mismatch');
   }
 
   let verdict;
@@ -358,7 +687,17 @@ function checkTicket(ticket, darviumRoot, pluginRoot) {
       rfc_crossref: rfcResult,
       constants: constResult,
       errors: errResult,
+      source_types: sourceTypes,
+      source_functions: sourceFunctions,
+      observation_quality: observationQuality,
+      test_functions: testResult,
     },
+    spec_elements: {
+      types: specElements.types,
+      functions: specElements.functions,
+      calibrationConstants: specElements.calibrationConstants,
+    },
+    test_plan: specElements.testPlan,
   };
 }
 
@@ -524,7 +863,7 @@ function main() {
   }
 
   const pluginRoot = getPluginRoot();
-  const labelToIdMap = buildLabelToIdMap(pluginRoot);
+  const labelToIdMap = buildLabelToIdMap(darviumRoot);
   const ticketsDoc = parseTicketsDoc(darviumRoot, labelToIdMap);
 
   if (!ticketsDoc) {
@@ -545,7 +884,7 @@ function main() {
 
   const ticketsResults = ticketsDoc.completed.map(ticket => {
     try {
-      return checkTicket(ticket, darviumRoot, pluginRoot);
+      return checkTicket(ticket, darviumRoot);
     } catch (e) {
       return {
         label: ticket.label,
@@ -578,6 +917,12 @@ module.exports = {
   resolveDarviumRoot,
   buildLabelToIdMap,
   parseTicketsDoc,
+  parseSpecForElements,
+  parseTestPlan,
+  checkSourceTypes,
+  checkSourceFunctions,
+  checkTestFunctions,
+  checkSpecObservation,
   checkConstants,
   checkErrors,
   checkRfcCrossRef,
