@@ -36,20 +36,21 @@ node "$_R/scripts/tickets/<script-name>.js" "<args>"
 | 9 | `validate-structure.js` | `/review-ticket` | 構造整合性検証 |
 | 10 | `review/run-quality-checks.js` | 各コマンド | 静的品質分析 |
 | 11 | `review/generate-report.js` | 各コマンド | 品質レポート生成 |
+| 12 | `check-all/run-check-all.js` | `/check-all` | 全 ✅ チケット一括横断チェック |
 
 ### ユーティリティ（必要時に AI が判断して使用）
 
 | # | スクリプト | 用途 |
 |---|-----------|------|
-| 12 | `search-tickets.js` | キーワード検索 |
-| 13 | `find-by-slug.js` | スラッグ検索 |
-| 14 | `delete-ticket.js` | チケット削除（復元不可） |
-| 15 | `backup-ticket.js` | チケットバックアップ |
-| 16 | `restore-ticket.js` | チケット復元 |
-| 17 | `create-draft.js` | 下書き作成 |
-| 18 | `promote-draft.js` | 下書き → spec 昇格 |
-| 19 | `ensure-ticket-structure.js` | ディレクトリ構造初期化 |
-| 20 | `resync-queue.js` | キュー再同期 |
+| 13 | `search-tickets.js` | キーワード検索 |
+| 14 | `find-by-slug.js` | スラッグ検索 |
+| 15 | `delete-ticket.js` | チケット削除（復元不可） |
+| 16 | `backup-ticket.js` | チケットバックアップ |
+| 17 | `restore-ticket.js` | チケット復元 |
+| 18 | `create-draft.js` | 下書き作成 |
+| 19 | `promote-draft.js` | 下書き → spec 昇格 |
+| 20 | `ensure-ticket-structure.js` | ディレクトリ構造初期化 |
+| 21 | `resync-queue.js` | キュー再同期 |
 
 ---
 
