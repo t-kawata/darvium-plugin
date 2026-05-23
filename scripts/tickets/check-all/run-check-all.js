@@ -233,6 +233,23 @@ function checkErrors(ticket, darviumRoot) {
 // ============================================================
 
 /**
+ * src/ ディレクトリ以下の .rs ファイルを再帰的に収集する。
+ */
+function findRsFilesRecursively(dir) {
+  const results = [];
+  if (!fs.existsSync(dir)) return results;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory() && entry.name !== 'target') {
+      results.push(...findRsFilesRecursively(fullPath));
+    } else if (entry.isFile() && entry.name.endsWith('.rs')) {
+      results.push(fullPath);
+    }
+  }
+  return results;
+}
+
+/**
  * spec ファイルのテスト計画からテストケース情報を抽出する。
  * Markdown テーブルをパースし、ID（# 列または ID 列）と説明を取得する。
  */
@@ -269,9 +286,8 @@ function parseTestPlan(specContent) {
       const cells = line.split('|').map(c => c.trim()).filter(c => c !== '');
       if (cells.length < 2) continue;
 
-      // 区切り行（---|---）をスキップ
+      // 区切り行（---|---）— ヘッダとデータの区切り。headerRow は破棄せず保持する。
       if (/^-{3,}$/.test(cells[0]) || cells.every(c => /^-{3,}$/.test(c))) {
-        headerRow = null;
         collectingTable = true;
         continue;
       }
@@ -390,7 +406,7 @@ function checkTestFunctions(darviumRoot, expectedTestIds) {
   if (!fs.existsSync(srcDir)) {
     return { passed: false, entries: expectedTestIds.map(id => ({ id, found: false, file: null, error: 'src/ not found' })) };
   }
-  const srcFiles = fs.readdirSync(srcDir).filter(f => f.endsWith('.rs'));
+  const srcFiles = findRsFilesRecursively(srcDir);
   const entries = [];
 
   for (const testId of expectedTestIds) {
@@ -405,12 +421,12 @@ function checkTestFunctions(darviumRoot, expectedTestIds) {
       new RegExp(`fn\\s+${normalizedId.split('_')[0]}[\\s(_]`),
     ];
 
-    for (const file of srcFiles) {
-      const content = fs.readFileSync(path.join(srcDir, file), 'utf8');
+    for (const filePath of srcFiles) {
+      const content = fs.readFileSync(filePath, 'utf8');
       for (const regex of patterns) {
         if (regex.test(content)) {
           found = true;
-          foundFile = file;
+          foundFile = path.relative(srcDir, filePath);
           break;
         }
       }
@@ -432,18 +448,18 @@ function checkSourceTypes(darviumRoot, expectedTypes) {
   if (!fs.existsSync(srcDir)) {
     return { passed: false, entries: expectedTypes.map(t => ({ ...t, found: false, file: null, error: 'src/ not found' })) };
   }
-  const srcFiles = fs.readdirSync(srcDir).filter(f => f.endsWith('.rs'));
+  const srcFiles = findRsFilesRecursively(srcDir);
   const entries = [];
 
   for (const t of expectedTypes) {
     let found = false;
     let foundFile = null;
-    for (const file of srcFiles) {
-      const content = fs.readFileSync(path.join(srcDir, file), 'utf8');
+    for (const filePath of srcFiles) {
+      const content = fs.readFileSync(filePath, 'utf8');
       const regex = new RegExp(`pub\\s+(?:struct|trait|enum)\\s+${t.name}\\b`);
       if (regex.test(content)) {
         found = true;
-        foundFile = file;
+        foundFile = path.relative(srcDir, filePath);
         break;
       }
     }
@@ -463,18 +479,18 @@ function checkSourceFunctions(darviumRoot, expectedFunctions) {
   if (!fs.existsSync(srcDir)) {
     return { passed: false, entries: expectedFunctions.map(f => ({ name: f, found: false, file: null, error: 'src/ not found' })) };
   }
-  const srcFiles = fs.readdirSync(srcDir).filter(f => f.endsWith('.rs'));
+  const srcFiles = findRsFilesRecursively(srcDir);
   const entries = [];
 
   for (const fn of expectedFunctions) {
     let found = false;
     let foundFile = null;
-    for (const file of srcFiles) {
-      const content = fs.readFileSync(path.join(srcDir, file), 'utf8');
+    for (const filePath of srcFiles) {
+      const content = fs.readFileSync(filePath, 'utf8');
       const fnRegex = new RegExp(`fn\\s+${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
       if (fnRegex.test(content)) {
         found = true;
-        foundFile = file;
+        foundFile = path.relative(srcDir, filePath);
         break;
       }
     }
@@ -536,7 +552,8 @@ function checkRfcCrossRef(ticket, darviumRoot) {
   const content = fs.readFileSync(rfcPath, 'utf8');
   const results = ticket.rfcSections.map(s => {
     const sectionNum = s.replace(/^§/, '');
-    const found = content.includes(`## ${sectionNum}`) || content.includes(s);
+    // RFC は ## (H2) と ### (H3) 両方の見出し階層を使用する
+    const found = content.includes(`## ${sectionNum}`) || content.includes(`### ${sectionNum}`) || content.includes(s);
     return { section: s, found };
   });
   return { passed: results.every(r => r.found), checked: results };
