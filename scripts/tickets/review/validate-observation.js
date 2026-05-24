@@ -10,7 +10,7 @@
 
 const path = require('path');
 const fs = require('fs');
-const { validateTicketId, resolveAllPaths, readFrontmatterFromFile } = require('../lib/tickets');
+const { validateTicketId, resolveAllPaths, readFrontmatterFromFile } = require('../../lib/tickets');
 
 const REQUIRED_SECTIONS = [
   { heading: '## 1.', label: '計装の実装状況', severity: 'major' },
